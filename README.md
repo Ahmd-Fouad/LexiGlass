@@ -80,21 +80,24 @@ Intervals cap at **7 days**. Quiz answers map to ratings automatically (correct 
 
 The Add/Edit Word form ([components/cards/CardForm.tsx](components/cards/CardForm.tsx)) has a built-in lookup assistant:
 
-1. Type a word or phrase (e.g. `meticulous` or `break the ice`).
-2. Focus the **Meaning** field (while it's empty) or click **✨ Suggest definition** — suggestion cards appear below the field with the definition, part of speech, phonetic spelling, synonyms/antonyms, source, and a pronunciation audio button when available. Click **Use this definition** to apply one; **Use pronunciation** / **Use as word type** fill those fields from the same card.
+1. Type a word or phrase (e.g. `meticulous` or `get rid of`).
+2. Focus the **Meaning** field (while it's empty) or click **✨ Suggest definition** — suggestion cards appear below the field with the definition, part of speech, phonetic spelling, synonyms/antonyms, source, and a pronunciation audio button when available. Click **Use this definition** to apply one.
 3. Focus the **Example sentence** field or click **✨ Suggest example** to get example sentences, each with a **Use this example** button.
 4. Nothing is ever applied or overwritten automatically, and every field stays manually editable (including the Arabic translation, which is never auto-translated).
 
-**Free API sources** (no API keys, no paid AI/dictionary/TTS/translation services):
+**Sources** (no API keys, no paid AI/dictionary/TTS/translation services):
 
 | Source | Role |
 |---|---|
-| [dictionaryapi.dev](https://dictionaryapi.dev) | Primary definitions, part of speech, phonetics, audio, synonyms/antonyms, examples |
+| Built-in phrase dictionary ([lib/local-phrase-dictionary.ts](lib/local-phrase-dictionary.ts)) | Curated definitions and examples for common phrases/phrasal verbs (`winning formula`, `get rid of`, `figure out`, …) plus curated examples for common study words — checked **first** for phrases |
+| [dictionaryapi.dev](https://dictionaryapi.dev) | Primary definitions for single words: part of speech, phonetics, audio, synonyms/antonyms, examples |
 | [FreeDictionaryAPI.com](https://freedictionaryapi.com) | Fallback definitions when dictionaryapi.dev has no result |
-| [Datamuse](https://www.datamuse.com/api/) | Spelling suggestions and related words/phrases when no exact definition exists (shown as "Related suggestions", never as definitions) |
-| [Tatoeba](https://tatoeba.org) | English example sentences; exact phrase first, then the phrase's main word |
+| [Datamuse](https://www.datamuse.com/api/) | Related words/spelling suggestions when no definition exists anywhere — always shown under a "related suggestions" heading, never as definitions |
+| [Tatoeba](https://tatoeba.org) | English example sentences via exact-match search |
 
-All external calls happen **server-side only**, centralized in [lib/dictionary.ts](lib/dictionary.ts) and exposed to the form through two internal routes: `GET /api/dictionary/lookup?term=…` and `GET /api/dictionary/examples?term=…`. Results are normalized (deduplicated, best 3–5 kept, very short/long examples dropped) and cached in the `DictionaryCache` table — definition and example lookups separately — so repeated lookups are instant and API-friendly. If a source is down the next one is tried, and the form always falls back cleanly to manual entry.
+**Quality rules**: every example suggestion must contain the target — the exact full phrase for phrases (an example for "winning formula" will never be a sentence that only contains "win"), or a valid form of the word for single words ("restrict" accepts "restricts"/"restricted", exact matches rank first). Sentences are scored (8–22 words ideal, fragments penalized), deduplicated, and the best 3–5 kept. If no exact example exists, the form says so and you write your own.
+
+All external calls happen **server-side only**, centralized in [lib/dictionary.ts](lib/dictionary.ts) and exposed to the form through two internal routes: `GET /api/dictionary/lookup?term=…` and `GET /api/dictionary/examples?term=…`. Results are cached in the `DictionaryCache` table (definitions and examples separately). Cached payloads carry a **cache version** — when lookup logic changes, the version is bumped and old records are ignored and overwritten, so stale low-quality results never linger. If a source is down the next one is tried, and the form always falls back cleanly to manual entry.
 
 Run the assistant's unit tests (parsers, normalization, fallbacks, caching) with `npm test`.
 

@@ -207,21 +207,23 @@ export function DefinitionPanel({
   onDismiss,
   onLookupRelated,
   onUseDefinition,
-  onUsePronunciation,
-  onUseWordType,
 }: {
   state: SuggestState<DefinitionLookupResult>;
   onDismiss: () => void;
   onLookupRelated: (word: string) => void;
   onUseDefinition: (s: DictionarySuggestion) => void;
-  onUsePronunciation: (phonetic: string) => void;
-  onUseWordType: (partOfSpeech: string) => void;
 }) {
   if (!state.visible) return null;
   const result = state.result;
 
+  // Related-only results are never presented as definitions.
+  const relatedOnly = state.status === "success" && result !== null && !result.exact;
+  const title = relatedOnly
+    ? "No exact definition found — related suggestions"
+    : `Definition suggestions — “${state.requestedTerm}”`;
+
   return (
-    <Panel title={`Definition suggestions — “${state.requestedTerm}”`} onDismiss={onDismiss}>
+    <Panel title={title} onDismiss={onDismiss}>
       {state.status === "loading" && <PanelLoading text="Looking for definitions..." />}
       {state.status === "error" && <PanelError />}
 
@@ -249,16 +251,6 @@ export function DefinitionPanel({
               )}
               <div className="mt-2 flex flex-wrap gap-2">
                 <SmallButton onClick={() => onUseDefinition(s)}>Use this definition</SmallButton>
-                {s.phonetic && (
-                  <SmallButton onClick={() => onUsePronunciation(s.phonetic as string)} title="Fill the pronunciation field">
-                    Use pronunciation
-                  </SmallButton>
-                )}
-                {s.partOfSpeech && (
-                  <SmallButton onClick={() => onUseWordType(s.partOfSpeech as string)} title="Fill the word type field">
-                    Use as word type
-                  </SmallButton>
-                )}
                 {s.audioUrl && (
                   <SmallButton
                     onClick={() => {
@@ -273,14 +265,12 @@ export function DefinitionPanel({
             </div>
           ))}
 
-          {!result.exact && result.related.length > 0 && (
+          {relatedOnly && result.related.length > 0 && (
             <div>
-              {result.suggestions.length === 0 && (
-                <p className="mb-1.5 text-sm text-ink-muted">
-                  No exact definition found. You can add your own meaning manually.
-                </p>
-              )}
-              <p className="mb-1 text-xs font-semibold text-ink-muted">Related suggestions</p>
+              <p className="mb-1.5 text-sm text-ink-muted">
+                These are related words, not definitions — click one to look it up, or add your own
+                meaning manually.
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {result.related.map((word) => (
                   <button
@@ -323,17 +313,12 @@ export function ExamplePanel({
 
       {state.status === "empty" && (
         <p className="py-1 text-sm text-ink-muted">
-          No suggestion found. Add your own example manually.
+          No exact example found. Please write your own example manually.
         </p>
       )}
 
       {state.status === "success" && result && (
         <div className="space-y-2">
-          {!result.exact && (
-            <p className="text-xs text-amber-200/90">
-              No exact examples for “{result.term}” — showing sentences with “{result.searchedWord}”.
-            </p>
-          )}
           {result.suggestions.map((s) => (
             <div key={s.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-sm leading-snug">{s.sentence}</p>

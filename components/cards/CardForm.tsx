@@ -149,8 +149,6 @@ export default function CardForm({ card, initialKind }: { card?: CardDTO; initia
             onDismiss={defs.dismiss}
             onLookupRelated={(word) => defs.load(word, termKey)}
             onUseDefinition={(s) => setForm((f) => ({ ...f, meaning: s.definition }))}
-            onUsePronunciation={(phonetic) => setForm((f) => ({ ...f, pronunciation: phonetic }))}
-            onUseWordType={(pos) => setForm((f) => ({ ...f, wordType: pos }))}
           />
         </div>
 
@@ -188,15 +186,8 @@ export default function CardForm({ card, initialKind }: { card?: CardDTO; initia
           />
         </div>
 
-        {/* Optional details the assistant can fill from dictionary data */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Pronunciation" hint="e.g. /məˈtɪk.jə.ləs/">
-            <Input value={form.pronunciation} onChange={set("pronunciation")} placeholder="/.../ (optional)" maxLength={200} />
-          </Field>
-          <Field label="Word type" hint="noun, verb, adjective, idiom…">
-            <Input value={form.wordType} onChange={set("wordType")} placeholder="e.g. adjective (optional)" maxLength={50} />
-          </Field>
-        </div>
+        {/* Pronunciation and word type inputs are hidden for now; the values
+            stay in form state so existing cards keep them when edited. */}
 
         {error && <ErrorBanner message={error} />}
         {justSaved && (

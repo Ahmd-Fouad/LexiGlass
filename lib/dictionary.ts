@@ -2,14 +2,25 @@
 //
 // All external API calls are centralized here and must only run server-side.
 // Sources (all free, no API keys):
-//   - dictionaryapi.dev      → primary definitions
-//   - freedictionaryapi.com  → fallback definitions
-//   - Datamuse               → related words / spelling suggestions (not a dictionary)
-//   - Tatoeba                → example sentences (not a dictionary)
+//   - built-in phrase dictionary → curated phrase definitions/examples (lib/local-phrase-dictionary.ts)
+//   - dictionaryapi.dev          → primary definitions for single words
+//   - freedictionaryapi.com      → fallback definitions
+//   - Datamuse                   → related words ONLY, never shown as definitions
+//   - Tatoeba                    → example sentences (exact-match search only)
+//
+// Definition source order:
+//   phrase:      local phrase dictionary → dictionaryapi.dev → FreeDictionaryAPI → Datamuse (related)
+//   single word: dictionaryapi.dev → FreeDictionaryAPI → local phrase dictionary → Datamuse (related)
+//
+// Example rules: every suggestion must contain the target — the full exact
+// phrase for phrases, or a valid form of the word for single words. There is
+// deliberately no "main word of the phrase" fallback.
 //
 // The orchestrators (`lookupDefinitions`, `lookupExamples`) accept an optional
 // cache store and fetch function so they can be unit-tested without a network
 // or database. API routes pass the Prisma-backed cache from lib/dictionary-cache.
+
+import { findLocalPhrase, findLocalWordExamples, type LocalPhraseEntry } from "./local-phrase-dictionary";
 
 // ---------- Normalized response types ----------
 
@@ -35,13 +46,13 @@ export interface DefinitionLookupResult {
   term: string; // original display text
   exact: boolean; // true when suggestions are real definitions of the term
   suggestions: DictionarySuggestion[];
-  related: string[]; // Datamuse related words / spelling suggestions
+  related: string[]; // Datamuse related words — never definitions
 }
 
 export interface ExampleLookupResult {
   term: string;
-  exact: boolean; // false when we fell back to the phrase's main word
-  searchedWord: string; // what was actually searched (main word for phrase fallback)
+  exact: boolean; // always true now: every suggestion contains the target
+  searchedWord: string;
   suggestions: ExampleSuggestion[];
 }
 
@@ -65,9 +76,24 @@ export interface LookupOptions {
 }
 
 export const MAX_TERM_LENGTH = 100;
+export const LOCAL_SOURCE = "built-in dictionary";
+
+/**
+ * Bumped whenever lookup/ranking logic changes. Cached payloads carry this
+ * version; entries written by older logic are ignored (treated as a cache
+ * miss) and overwritten, so stale low-quality results can't linger.
+ */
+export const DICTIONARY_CACHE_VERSION = 2;
+
 const MAX_SUGGESTIONS = 5;
-const MIN_EXAMPLE_WORDS = 4;
+// An example is "high quality" when it uses the exact word (or simple plural)
+// and has a decent length — see scoreExampleSentence. Curated local examples
+// are added when the APIs can't provide at least 3 of these.
+const HIGH_QUALITY_EXAMPLE_SCORE = 60;
+const MIN_EXAMPLE_WORDS = 5;
 const MAX_EXAMPLE_WORDS = 26;
+const IDEAL_EXAMPLE_WORDS_MIN = 8;
+const IDEAL_EXAMPLE_WORDS_MAX = 22;
 const MAX_EXAMPLE_CHARS = 180;
 const FETCH_TIMEOUT_MS = 6000;
 
@@ -91,24 +117,6 @@ export function normalizeTerm(raw: string): { display: string; key: string } {
 
 export function isPhrase(key: string): boolean {
   return key.includes(" ");
-}
-
-const STOPWORDS = new Set([
-  "the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "but", "with",
-  "at", "by", "from", "up", "out", "off", "about", "into", "over", "under",
-  "after", "before", "is", "are", "was", "were", "be", "been", "being", "it",
-  "its", "this", "that", "these", "those", "as", "so", "not", "no", "do",
-  "does", "did", "have", "has", "had", "will", "would", "can", "could",
-  "should", "my", "your", "his", "her", "our", "their", "you", "he", "she",
-  "we", "they", "i", "me", "him", "them", "us",
-]);
-
-/** Picks the most important word of a phrase (longest non-stopword). */
-export function mainWordOf(key: string): string {
-  const words = key.split(" ").filter(Boolean);
-  const candidates = words.filter((w) => !STOPWORDS.has(w));
-  const pool = candidates.length > 0 ? candidates : words;
-  return pool.reduce((best, w) => (w.length > best.length ? w : best), pool[0] ?? key);
 }
 
 // ---------- Small helpers ----------
@@ -144,6 +152,37 @@ function wordCount(s: string): number {
 /** Case/punctuation-insensitive key used for duplicate detection. */
 function dedupeKey(s: string): string {
   return s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+// ---------- Target-term matching ----------
+
+/**
+ * True when `token` is `word` or a common inflection/derivation of it, e.g.
+ * restrict → restricts / restricted / restricting / restriction(s),
+ * win → wins / winning / winner, make → making, carry → carried.
+ */
+function wordFormsMatch(token: string, word: string): boolean {
+  if (token === word) return true;
+  const stems = new Set([word]);
+  if (word.endsWith("e")) stems.add(word.slice(0, -1)); // make → mak(ing)
+  if (word.endsWith("y")) stems.add(word.slice(0, -1) + "i"); // carry → carri(ed)
+  if (/[bcdfghjklmnpqrstvz]$/.test(word)) stems.add(word + word.slice(-1)); // run → runn(ing)
+  const suffixes = ["s", "es", "ed", "d", "ing", "ion", "ions", "er", "ers", "ly"];
+  for (const stem of stems) {
+    if (token.startsWith(stem) && suffixes.includes(token.slice(stem.length))) return true;
+  }
+  return false;
+}
+
+/**
+ * Does the sentence contain the target term? Phrases require the exact full
+ * phrase (word-boundary, case/punctuation-insensitive); single words accept
+ * the word itself or a valid form of it.
+ */
+export function containsTerm(sentence: string, termKey: string): boolean {
+  const norm = normalizeTerm(sentence).key;
+  if (isPhrase(termKey)) return ` ${norm} `.includes(` ${termKey} `);
+  return norm.split(" ").some((t) => t.length > 0 && wordFormsMatch(t, termKey));
 }
 
 // ---------- Response parsers (pure, exported for tests) ----------
@@ -251,49 +290,124 @@ export function parseTatoeba(json: unknown): ExampleSuggestion[] {
   return out;
 }
 
-// ---------- Filtering / data quality ----------
+// ---------- Quality scoring ----------
 
-/** Removes duplicate/empty definitions and keeps the best few. */
-export function dedupeDefinitions(
-  suggestions: DictionarySuggestion[],
-  cap = MAX_SUGGESTIONS
-): DictionarySuggestion[] {
-  const seen = new Set<string>();
-  const out: DictionarySuggestion[] = [];
-  for (const s of suggestions) {
-    const key = dedupeKey(s.definition);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push({ ...s, id: `def-${out.length}` });
-    if (out.length >= cap) break;
+/**
+ * Scores an example sentence for a given term. Higher is better. Prefers
+ * sentences that contain the exact term (required for phrases), 8–22 words
+ * long, and shaped like a real sentence rather than a fragment.
+ */
+export function scoreExampleSentence(sentence: string, term: string): number {
+  const clean = sentence.trim().replace(/\s+/g, " ");
+  const { key } = normalizeTerm(term);
+  const tokens = normalizeTerm(clean).key.split(" ").filter(Boolean);
+  let score = 0;
+
+  // Target containment — the dominant factor.
+  if (isPhrase(key)) {
+    score += containsTerm(clean, key) ? 60 : -100;
+  } else if (tokens.includes(key)) {
+    score += 60; // exact word, e.g. "restrict"
+  } else if (tokens.includes(`${key}s`) || tokens.includes(`${key}es`)) {
+    score += 50; // simple plural / 3rd person, e.g. "restricts"
+  } else if (tokens.some((t) => wordFormsMatch(t, key))) {
+    score += 30; // other valid form, e.g. "restricted", "restriction"
+  } else {
+    score -= 100;
   }
-  return out;
+
+  // Length: 8–22 words is the sweet spot.
+  const words = wordCount(clean);
+  if (words >= IDEAL_EXAMPLE_WORDS_MIN && words <= IDEAL_EXAMPLE_WORDS_MAX) score += 20;
+  else if (words >= MIN_EXAMPLE_WORDS && words < IDEAL_EXAMPLE_WORDS_MIN) score += 8;
+  else if (words > IDEAL_EXAMPLE_WORDS_MAX && words <= MAX_EXAMPLE_WORDS) score += 4;
+  else score -= 50; // very short or very long
+
+  // Fragment-like / unnatural sentences.
+  if (!/[.!?…”"')]$/.test(clean)) score -= 10;
+  if (!/^[\p{Lu}\p{N}“”"']/u.test(clean)) score -= 5;
+  if (clean.length > 3 && clean === clean.toUpperCase()) score -= 15;
+  if (/[{}<>|\\_@#*]/.test(clean)) score -= 20;
+
+  return score;
 }
 
 /**
- * Removes duplicates, drops examples that are too short (< 4 words) or too
- * long, prefers shorter sentences, and keeps the best few.
+ * Scores a definition for a given term. Higher is better. Prefers short,
+ * clear definitions; penalizes one-word, overly technical, or circular ones.
  */
-export function filterExamples(
+export function scoreDefinitionSuggestion(definition: string, term: string): number {
+  const clean = definition.trim().replace(/\s+/g, " ");
+  const words = wordCount(clean);
+  let score = 0;
+
+  if (words <= 1) score -= 30; // one-word definitions are rarely useful
+  else if (words >= 3 && words <= 24) score += 20; // short and clear
+  else if (words > 40) score -= 10; // rambling
+
+  // Technical / niche-register markers — usable, but ranked below plain ones.
+  if (/\b(archaic|obsolete|dated|dialectal|slang|vulgar)\b/i.test(clean)) score -= 15;
+  if (/\b(botany|zoology|chemistry|physics|mathematics|nautical|heraldry|taxonomy|genus)\b/i.test(clean)) score -= 10;
+  if (/^\(/.test(clean)) score -= 10; // "(specifically) …" label-prefixed niche senses
+  if ((clean.match(/\(/g) ?? []).length >= 2) score -= 10; // parenthesis-heavy = technical
+  if ((clean.match(/;/g) ?? []).length >= 2) score -= 3; // mild: "to limit; to confine" is fine
+
+  if (dedupeKey(clean) === normalizeTerm(term).key) score -= 40; // circular
+
+  return score;
+}
+
+// ---------- Ranking / filtering ----------
+
+/** Dedupes definitions, ranks them by quality score, keeps the best few. */
+export function rankDefinitions(
+  suggestions: DictionarySuggestion[],
+  term: string,
+  cap = MAX_SUGGESTIONS
+): DictionarySuggestion[] {
+  const seen = new Set<string>();
+  const unique: DictionarySuggestion[] = [];
+  for (const s of suggestions) {
+    const k = dedupeKey(s.definition);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    unique.push(s);
+  }
+  return unique
+    .map((s) => ({ s, score: scoreDefinitionSuggestion(s.definition, term) }))
+    .sort((a, b) => b.score - a.score) // stable: ties keep source order
+    .slice(0, cap)
+    .map(({ s }, i) => ({ ...s, id: `def-${i}` }));
+}
+
+/**
+ * Filters and ranks example sentences for a term: drops sentences shorter
+ * than 5 words or overly long ones, requires the target term (exact full
+ * phrase for phrases, a valid word form for single words), removes
+ * duplicates, and keeps the best few by score.
+ */
+export function rankExamples(
   examples: ExampleSuggestion[],
+  term: string,
   cap = MAX_SUGGESTIONS
 ): ExampleSuggestion[] {
+  const { key } = normalizeTerm(term);
   const seen = new Set<string>();
-  const usable: ExampleSuggestion[] = [];
+  const scored: { ex: ExampleSuggestion; score: number }[] = [];
   for (const ex of examples) {
     const sentence = ex.sentence.trim().replace(/\s+/g, " ");
     if (!sentence) continue;
     const words = wordCount(sentence);
     if (words < MIN_EXAMPLE_WORDS) continue;
     if (words > MAX_EXAMPLE_WORDS || sentence.length > MAX_EXAMPLE_CHARS) continue;
-    const key = dedupeKey(sentence);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    usable.push({ ...ex, sentence });
+    if (key && !containsTerm(sentence, key)) continue; // must contain the target
+    const k = dedupeKey(sentence);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    scored.push({ ex: { ...ex, sentence }, score: scoreExampleSentence(sentence, term) });
   }
-  // Prefer short, clear sentences; stable for equal lengths.
-  usable.sort((a, b) => a.sentence.length - b.sentence.length);
-  return usable.slice(0, cap).map((ex, i) => ({ ...ex, id: `ex-${i}` }));
+  scored.sort((a, b) => b.score - a.score); // stable: ties keep source order
+  return scored.slice(0, cap).map(({ ex }, i) => ({ ...ex, id: `ex-${i}` }));
 }
 
 // ---------- Fetch helper ----------
@@ -317,7 +431,12 @@ async function fetchJson(fetchFn: typeof fetch, url: string): Promise<FetchOutco
   }
 }
 
-// ---------- Cache helpers (failures must never break a lookup) ----------
+// ---------- Versioned cache helpers (failures must never break a lookup) ----------
+
+interface VersionedPayload<T> {
+  v: number;
+  result: T;
+}
 
 async function cacheGet<T>(
   cache: DictionaryCacheStore | undefined,
@@ -327,7 +446,12 @@ async function cacheGet<T>(
   if (!cache) return null;
   try {
     const raw = await cache.get(key, type);
-    return raw ? (JSON.parse(raw) as T) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<VersionedPayload<T>>;
+    // Entries written by older lookup logic (no/old version) are ignored and
+    // will be overwritten by the fresh result.
+    if (parsed?.v !== DICTIONARY_CACHE_VERSION || parsed.result === undefined) return null;
+    return parsed.result;
   } catch {
     return null;
   }
@@ -339,7 +463,8 @@ async function cacheSet(
 ): Promise<void> {
   if (!cache) return;
   try {
-    await cache.set({ ...entry, data: JSON.stringify(entry.data) });
+    const payload: VersionedPayload<unknown> = { v: DICTIONARY_CACHE_VERSION, result: entry.data };
+    await cache.set({ ...entry, data: JSON.stringify(payload) });
   } catch {
     // Caching is best-effort; the lookup result is still returned.
   }
@@ -347,10 +472,24 @@ async function cacheSet(
 
 // ---------- Definition lookup orchestrator ----------
 
+function localPhraseSuggestion(entry: LocalPhraseEntry): DictionarySuggestion {
+  return {
+    id: "local-0",
+    definition: entry.definition,
+    partOfSpeech: entry.type,
+    phonetic: null,
+    audioUrl: null,
+    example: entry.example,
+    synonyms: entry.synonyms ?? [],
+    antonyms: [],
+    source: LOCAL_SOURCE,
+  };
+}
+
 /**
- * Definition lookup: cache → dictionaryapi.dev → FreeDictionaryAPI.com →
- * Datamuse related/spelling suggestions (phrases and misses). Results are
- * cached only when at least one source actually responded.
+ * Definition lookup. Phrases: built-in phrase dictionary → dictionaryapi.dev →
+ * FreeDictionaryAPI. Single words: dictionaryapi.dev → FreeDictionaryAPI →
+ * built-in dictionary. Datamuse only ever fills `related` — never definitions.
  */
 export async function lookupDefinitions(
   rawTerm: string,
@@ -369,34 +508,56 @@ export async function lookupDefinitions(
   let anySourceResponded = false;
   let anySourceFailed = false;
 
-  // 1. Primary: dictionaryapi.dev
-  const primary = await fetchJson(
-    fetchFn,
-    `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(key)}`
-  );
-  if (primary.kind === "failed") anySourceFailed = true;
-  else anySourceResponded = true;
-  if (primary.kind === "ok") {
-    suggestions = parseDictionaryApiDev(primary.json);
-    if (suggestions.length > 0) source = "dictionaryapi.dev";
-  }
+  const tryLocal = (): boolean => {
+    const entry = findLocalPhrase(key);
+    if (!entry) return false;
+    suggestions = [localPhraseSuggestion(entry)];
+    source = LOCAL_SOURCE;
+    anySourceResponded = true; // the built-in dictionary always responds
+    return true;
+  };
 
-  // 2. Fallback: freedictionaryapi.com
-  if (suggestions.length === 0) {
-    const fallback = await fetchJson(
-      fetchFn,
-      `https://freedictionaryapi.com/api/v1/entries/en/${encodeURIComponent(key)}`
-    );
-    if (fallback.kind === "failed") anySourceFailed = true;
+  const tryApi = async (
+    url: string,
+    parse: (json: unknown) => DictionarySuggestion[],
+    name: string
+  ): Promise<boolean> => {
+    const res = await fetchJson(fetchFn, url);
+    if (res.kind === "failed") anySourceFailed = true;
     else anySourceResponded = true;
-    if (fallback.kind === "ok") {
-      suggestions = parseFreeDictionaryApi(fallback.json);
-      if (suggestions.length > 0) source = "freedictionaryapi.com";
-    }
+    if (res.kind !== "ok") return false;
+    const parsed = parse(res.json);
+    if (parsed.length === 0) return false;
+    suggestions = parsed;
+    source = name;
+    return true;
+  };
+
+  const tryDictApiDev = () =>
+    tryApi(
+      `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(key)}`,
+      parseDictionaryApiDev,
+      "dictionaryapi.dev"
+    );
+  const tryFreeDict = () =>
+    tryApi(
+      `https://freedictionaryapi.com/api/v1/entries/en/${encodeURIComponent(key)}`,
+      parseFreeDictionaryApi,
+      "freedictionaryapi.com"
+    );
+
+  // Phrases trust the curated local dictionary first; single words trust the
+  // real dictionaries first and use local entries as a late fallback.
+  let found: boolean;
+  if (isPhrase(key)) {
+    found = tryLocal() || (await tryDictApiDev()) || (await tryFreeDict());
+  } else {
+    found = (await tryDictApiDev()) || (await tryFreeDict()) || tryLocal();
   }
 
-  // 3. No exact definition → Datamuse related words + spelling suggestions.
-  if (suggestions.length === 0) {
+  // No definition anywhere → Datamuse related words + spelling suggestions.
+  // These are shown under a "related suggestions" heading, never as definitions.
+  if (!found) {
     const [meansLike, spelledLike] = await Promise.all([
       fetchJson(fetchFn, `https://api.datamuse.com/words?ml=${encodeURIComponent(key)}&max=8`),
       fetchJson(fetchFn, `https://api.datamuse.com/words?sp=${encodeURIComponent(key)}&max=5`),
@@ -415,7 +576,7 @@ export async function lookupDefinitions(
   const result: DefinitionLookupResult = {
     term: display,
     exact: suggestions.length > 0,
-    suggestions: dedupeDefinitions(suggestions),
+    suggestions: rankDefinitions(suggestions, key),
     related,
   };
 
@@ -441,8 +602,11 @@ async function tatoebaSearch(fetchFn: typeof fetch, query: string): Promise<Fetc
 }
 
 /**
- * Example lookup: cache → dictionary API examples → Tatoeba exact term →
- * Tatoeba main word of the phrase. Only English sentences are returned.
+ * Example lookup: built-in phrase dictionary example → dictionary API
+ * examples → Tatoeba exact search → curated word examples when API results
+ * are missing or low quality. Every returned sentence contains the target
+ * (full phrase for phrases, a valid word form for single words) — there is
+ * no loose "main word" fallback.
  */
 export async function lookupExamples(
   rawTerm: string,
@@ -450,19 +614,25 @@ export async function lookupExamples(
 ): Promise<ExampleLookupResult> {
   const fetchFn = opts.fetchFn ?? fetch;
   const { display, key } = normalizeTerm(rawTerm);
-  if (!key) return { term: display, exact: false, searchedWord: "", suggestions: [] };
+  if (!key) return { term: display, exact: true, searchedWord: "", suggestions: [] };
 
   const cached = await cacheGet<ExampleLookupResult>(opts.cache, key, "example");
   if (cached) return cached;
 
   const collected: ExampleSuggestion[] = [];
-  let source = "none";
-  let exact = true;
-  let searchedWord = key;
   let anySourceResponded = false;
   let anySourceFailed = false;
+  const usableCount = () => rankExamples(collected, key).length;
 
-  // 1. Examples embedded in dictionary API definitions.
+  // 1. Curated example from the built-in phrase dictionary (always exact).
+  const phraseEntry = findLocalPhrase(key);
+  if (phraseEntry) {
+    collected.push({ id: "local-0", sentence: phraseEntry.example, source: LOCAL_SOURCE });
+    anySourceResponded = true;
+  }
+
+  // 2. Dictionary API examples — rankExamples keeps only those that contain
+  //    the exact target.
   const dict = await fetchJson(
     fetchFn,
     `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(key)}`
@@ -475,51 +645,48 @@ export async function lookupExamples(
         collected.push({ id: `d-${collected.length}`, sentence: s.example, source: "dictionaryapi.dev" });
       }
     }
-    if (collected.length > 0) source = "dictionaryapi.dev";
   }
 
-  // 2. Tatoeba — exact term (quoted when it's a phrase).
-  if (filterExamples(collected).length < 3) {
+  // 3. Tatoeba — exact search only (quoted for phrases). Results that don't
+  //    contain the full target phrase are filtered out by rankExamples.
+  if (usableCount() < MAX_SUGGESTIONS) {
     const query = isPhrase(key) ? `"${key}"` : key;
     const exactSearch = await tatoebaSearch(fetchFn, query);
     if (exactSearch.kind === "failed") anySourceFailed = true;
     else anySourceResponded = true;
     if (exactSearch.kind === "ok") {
-      const sentences = parseTatoeba(exactSearch.json);
-      if (sentences.length > 0) {
-        collected.push(...sentences);
-        source = source === "none" ? "tatoeba" : "mixed";
-      }
-    }
-
-    // 3. Phrase with no exact hits → search the phrase's main word.
-    if (isPhrase(key) && filterExamples(collected).length === 0) {
-      const main = mainWordOf(key);
-      const mainSearch = await tatoebaSearch(fetchFn, main);
-      if (mainSearch.kind === "failed") anySourceFailed = true;
-      else anySourceResponded = true;
-      if (mainSearch.kind === "ok") {
-        const sentences = parseTatoeba(mainSearch.json);
-        if (sentences.length > 0) {
-          collected.push(...sentences);
-          exact = false;
-          searchedWord = main;
-          source = "tatoeba";
-        }
-      }
+      collected.push(...parseTatoeba(exactSearch.json));
     }
   }
 
+  // 4. Curated local examples for common study words, only when API results
+  //    are missing or low quality (fewer than 3 high-quality sentences).
+  const highQualityCount = () =>
+    rankExamples(collected, key).filter(
+      (e) => scoreExampleSentence(e.sentence, key) >= HIGH_QUALITY_EXAMPLE_SCORE
+    ).length;
+  if (highQualityCount() < 3) {
+    const localExamples = findLocalWordExamples(key);
+    if (localExamples.length > 0) {
+      for (const sentence of localExamples) {
+        collected.push({ id: `w-${collected.length}`, sentence, source: LOCAL_SOURCE });
+      }
+      anySourceResponded = true;
+    }
+  }
+
+  const suggestions = rankExamples(collected, key);
   const result: ExampleLookupResult = {
     term: display,
-    exact,
-    searchedWord,
-    suggestions: filterExamples(collected),
+    exact: true,
+    searchedWord: key,
+    suggestions,
   };
 
   // Cache real data always; cache an empty result only when every consulted
   // source actually responded (a down/timed-out source should be retried).
-  if (anySourceResponded && (result.suggestions.length > 0 || !anySourceFailed)) {
+  if (anySourceResponded && (suggestions.length > 0 || !anySourceFailed)) {
+    const source = suggestions[0]?.source ?? "none";
     await cacheSet(opts.cache, { term: display, normalizedTerm: key, type: "example", source, data: result });
   }
   return result;
