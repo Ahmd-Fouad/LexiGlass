@@ -1,0 +1,124 @@
+// LexiGlass database schema.
+// Default provider is SQLite for zero-setup local use.
+// To use Supabase/PostgreSQL: change provider to "postgresql" and set DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String
+  passwordHash  String
+  createdAt     DateTime       @default(now())
+  flashcards    Flashcard[]
+  grammarTopics GrammarTopic[]
+  quizSessions  QuizSession[]
+  reviewLogs    ReviewLog[]
+}
+
+// A flashcard is either a word or a phrase (kind field).
+model Flashcard {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  text          String // the English word or phrase
+  kind          String    @default("word") // "word" | "phrase"
+  meaning       String // English meaning / definition
+  translation   String? // Arabic translation
+  example       String? // example sentence (should contain the word)
+  pronunciation String? // pronunciation notes, e.g. /ˈwɜːrd/
+  wordType      String? // noun | verb | adjective | adverb | phrase | idiom | other
+  notes         String?
+  tags          String    @default("") // comma-separated tags
+  category      String?
+  difficulty    String    @default("medium") // easy | medium | hard
+
+  // Spaced repetition state
+  easeFactor     Float     @default(2.5)
+  intervalDays   Float     @default(0)
+  dueDate        DateTime  @default(now())
+  reviewCount    Int       @default(0)
+  correctCount   Int       @default(0)
+  incorrectCount Int       @default(0)
+  lapses         Int       @default(0) // times answered "Again" / wrong
+  lastReviewedAt DateTime?
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  reviewLogs  ReviewLog[]
+  quizAnswers QuizAnswer[]
+
+  @@index([userId, dueDate])
+}
+
+model GrammarTopic {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  explanation    String
+  examples       String       @default("") // one example per line
+  commonMistakes String       @default("") // one mistake per line, format: "wrong => right"
+  notes          String?
+  tags           String       @default("")
+  difficulty     String       @default("medium")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  quizAnswers    QuizAnswer[]
+
+  @@index([userId])
+}
+
+model QuizSession {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String // "vocab" | "grammar" | "review"
+  totalQuestions Int          @default(0)
+  correctCount   Int          @default(0)
+  startedAt      DateTime     @default(now())
+  finishedAt     DateTime?
+  answers        QuizAnswer[]
+
+  @@index([userId, startedAt])
+}
+
+model QuizAnswer {
+  id             String        @id @default(cuid())
+  sessionId      String
+  session        QuizSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  flashcardId    String?
+  flashcard      Flashcard?    @relation(fields: [flashcardId], references: [id], onDelete: SetNull)
+  grammarTopicId String?
+  grammarTopic   GrammarTopic? @relation(fields: [grammarTopicId], references: [id], onDelete: SetNull)
+  questionType   String // mcq_meaning | mcq_word | fill_blank | true_false | mcq | choose_correct | find_mistake | correct_sentence
+  question       String
+  correctAnswer  String
+  userAnswer     String
+  isCorrect      Boolean
+  createdAt      DateTime      @default(now())
+}
+
+// One row per SRS review of a flashcard (from review mode or a vocab quiz).
+model ReviewLog {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcardId    String
+  flashcard      Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+  rating         String // again | hard | good | easy
+  wasCorrect     Boolean
+  intervalBefore Float
+  intervalAfter  Float
+  reviewedAt     DateTime  @default(now())
+
+  @@index([userId, reviewedAt])
+}

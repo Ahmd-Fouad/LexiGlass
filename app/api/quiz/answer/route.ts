@@ -1,0 +1,82 @@
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { requireUserId } from "@/lib/auth";
+import { badRequest, str, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
+import { applyRating, ratingFromCorrectness } from "@/lib/srs";
+
+/**
+ * Records one answered quiz question. For vocabulary questions it also
+ * updates the card's spaced-repetition schedule (correct → "good", wrong → "again").
+ */
+export async function POST(req: Request) {
+  try {
+    const userId = await requireUserId();
+    const body = await req.json().catch(() => ({}));
+
+    const sessionId = str(body.sessionId, 100);
+    const question = str(body.question, 1000);
+    const correctAnswer = strOrEmpty(body.correctAnswer, 1000);
+    const userAnswer = strOrEmpty(body.userAnswer, 1000) || "(no answer)";
+    const isCorrect = body.isCorrect === true;
+    if (!sessionId || !question) return badRequest("sessionId and question are required.");
+
+    const session = await db.quizSession.findUnique({ where: { id: sessionId } });
+    if (!session || session.userId !== userId) {
+      return NextResponse.json({ error: "Quiz session not found" }, { status: 404 });
+    }
+
+    const flashcardId = str(body.flashcardId, 100);
+    const grammarTopicId = str(body.grammarTopicId, 100);
+
+    await db.quizAnswer.create({
+      data: {
+        sessionId,
+        flashcardId: flashcardId ?? undefined,
+        grammarTopicId: grammarTopicId ?? undefined,
+        questionType: strOrEmpty(body.questionType, 50) || "mcq",
+        question,
+        correctAnswer,
+        userAnswer,
+        isCorrect,
+      },
+    });
+
+    // Vocabulary answers drive the SRS schedule.
+    if (flashcardId) {
+      const card = await db.flashcard.findUnique({ where: { id: flashcardId } });
+      if (card && card.userId === userId) {
+        const rating = ratingFromCorrectness(isCorrect);
+        const next = applyRating(card, rating);
+        await db.$transaction([
+          db.flashcard.update({
+            where: { id: card.id },
+            data: {
+              easeFactor: next.easeFactor,
+              intervalDays: next.intervalDays,
+              dueDate: next.dueDate,
+              reviewCount: { increment: 1 },
+              correctCount: { increment: isCorrect ? 1 : 0 },
+              incorrectCount: { increment: isCorrect ? 0 : 1 },
+              lapses: { increment: isCorrect ? 0 : 1 },
+              lastReviewedAt: new Date(),
+            },
+          }),
+          db.reviewLog.create({
+            data: {
+              userId,
+              flashcardId: card.id,
+              rating,
+              wasCorrect: isCorrect,
+              intervalBefore: card.intervalDays,
+              intervalAfter: next.intervalDays,
+            },
+          }),
+        ]);
+      }
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
+}
