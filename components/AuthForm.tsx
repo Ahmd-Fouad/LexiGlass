@@ -74,10 +74,6 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
             )}
           </p>
         </GlassCard>
-
-        <p className="mt-6 text-center text-xs text-ink-muted/70">
-          Try the demo account: demo@lexiglass.app / demo1234
-        </p>
       </div>
     </main>
   );
