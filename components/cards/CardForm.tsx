@@ -1,10 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
 import { Button, ErrorBanner, Field, GlassCard, Input, Select, TextArea } from "@/components/ui";
 import type { CardDTO } from "./card-dto";
+import { DefinitionPanel, ExamplePanel, useSuggestions } from "./SmartSuggest";
+import type { DefinitionLookupResult, ExampleLookupResult } from "@/lib/dictionary";
 
 const EMPTY_EXTRAS = {
   pronunciation: "",
@@ -14,6 +16,11 @@ const EMPTY_EXTRAS = {
   category: "",
   difficulty: "medium",
 };
+
+// Stable empty-result predicates for the suggestion panels.
+const noDefinitions = (r: DefinitionLookupResult) =>
+  r.suggestions.length === 0 && r.related.length === 0;
+const noExamples = (r: ExampleLookupResult) => r.suggestions.length === 0;
 
 export default function CardForm({ card, initialKind }: { card?: CardDTO; initialKind?: string }) {
   const router = useRouter();
@@ -36,6 +43,19 @@ export default function CardForm({ card, initialKind }: { card?: CardDTO; initia
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState<"save" | "save-another" | null>(null);
+
+  // Smart Definition & Example Assistant state (one panel per field).
+  const defs = useSuggestions<DefinitionLookupResult>("/api/dictionary/lookup", noDefinitions);
+  const examples = useSuggestions<ExampleLookupResult>("/api/dictionary/examples", noExamples);
+
+  // Hide stale suggestion panels when the word/phrase itself changes.
+  const termKey = form.text.trim().toLowerCase().replace(/\s+/g, " ");
+  const { syncTerm: syncDefsTerm } = defs;
+  const { syncTerm: syncExamplesTerm } = examples;
+  useEffect(() => {
+    syncDefsTerm(termKey);
+    syncExamplesTerm(termKey);
+  }, [termKey, syncDefsTerm, syncExamplesTerm]);
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -100,17 +120,83 @@ export default function CardForm({ card, initialKind }: { card?: CardDTO; initia
           </Field>
         </div>
 
-        <Field label="Meaning" required>
-          <TextArea value={form.meaning} onChange={set("meaning")} placeholder="What does it mean, in English?" required rows={2} />
-        </Field>
+        <div className="relative">
+          <Field label="Meaning" required>
+            <TextArea
+              value={form.meaning}
+              onChange={set("meaning")}
+              onFocus={() => {
+                if (form.text.trim() && !form.meaning.trim() && !defs.hasLoadedFor(form.text)) {
+                  defs.scheduleFocusLoad(form.text);
+                }
+              }}
+              onBlur={defs.cancelScheduledLoad}
+              placeholder="What does it mean, in English?"
+              required
+              rows={2}
+            />
+          </Field>
+          <button
+            type="button"
+            onClick={() => form.text.trim() && defs.load(form.text)}
+            disabled={!form.text.trim()}
+            className="absolute right-0 top-0 rounded-lg px-2 py-0.5 text-xs font-semibold text-violet-200 hover:bg-white/10 disabled:pointer-events-none disabled:opacity-40"
+          >
+            ✨ Suggest definition
+          </button>
+          <DefinitionPanel
+            state={defs.state}
+            onDismiss={defs.dismiss}
+            onLookupRelated={(word) => defs.load(word, termKey)}
+            onUseDefinition={(s) => setForm((f) => ({ ...f, meaning: s.definition }))}
+            onUsePronunciation={(phonetic) => setForm((f) => ({ ...f, pronunciation: phonetic }))}
+            onUseWordType={(pos) => setForm((f) => ({ ...f, wordType: pos }))}
+          />
+        </div>
 
         <Field label="Arabic translation">
           <Input value={form.translation} onChange={set("translation")} placeholder="الترجمة العربية (اختياري)" dir="rtl" lang="ar" />
         </Field>
 
-        <Field label="Example sentence" hint="Include the word itself — it's used for fill-in-the-blank quiz questions.">
-          <TextArea value={form.example} onChange={set("example")} placeholder="She kept meticulous records of every expense." rows={2} />
-        </Field>
+        <div className="relative">
+          <Field label="Example sentence" hint="Include the word itself — it's used for fill-in-the-blank quiz questions.">
+            <TextArea
+              value={form.example}
+              onChange={set("example")}
+              onFocus={() => {
+                if (form.text.trim() && !form.example.trim() && !examples.hasLoadedFor(form.text)) {
+                  examples.scheduleFocusLoad(form.text);
+                }
+              }}
+              onBlur={examples.cancelScheduledLoad}
+              placeholder="She kept meticulous records of every expense."
+              rows={2}
+            />
+          </Field>
+          <button
+            type="button"
+            onClick={() => form.text.trim() && examples.load(form.text)}
+            disabled={!form.text.trim()}
+            className="absolute right-0 top-0 rounded-lg px-2 py-0.5 text-xs font-semibold text-violet-200 hover:bg-white/10 disabled:pointer-events-none disabled:opacity-40"
+          >
+            ✨ Suggest example
+          </button>
+          <ExamplePanel
+            state={examples.state}
+            onDismiss={examples.dismiss}
+            onUseExample={(s) => setForm((f) => ({ ...f, example: s.sentence }))}
+          />
+        </div>
+
+        {/* Optional details the assistant can fill from dictionary data */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Pronunciation" hint="e.g. /məˈtɪk.jə.ləs/">
+            <Input value={form.pronunciation} onChange={set("pronunciation")} placeholder="/.../ (optional)" maxLength={200} />
+          </Field>
+          <Field label="Word type" hint="noun, verb, adjective, idiom…">
+            <Input value={form.wordType} onChange={set("wordType")} placeholder="e.g. adjective (optional)" maxLength={50} />
+          </Field>
+        </div>
 
         {error && <ErrorBanner message={error} />}
         {justSaved && (

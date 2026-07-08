@@ -6,6 +6,7 @@ A full-stack flashcard and grammar study app with a spaced-repetition system, bu
 
 - **Dashboard** — words/phrases/grammar counts, cards due today, weekly reviews, accuracy, streak, mastered count, quick actions.
 - **Flashcards** — words and phrases with meaning, Arabic translation, example sentence, pronunciation notes, word type, difficulty, tags, category, and full review history. Add / edit / delete, search, and filters (type, difficulty, tag, due, recently added, weak words).
+- **Smart Definition & Example Assistant** — in the Add/Edit Word form, one click (or focusing an empty field) suggests real dictionary definitions and example sentences for the word or phrase you typed, powered entirely by **free, keyless APIs** — no paid AI or dictionary services. Suggestions are never applied automatically; you click "Use this definition" / "Use this example" to fill a field. Lookups are cached in the database so the same term never hits the external APIs twice.
 - **Spaced repetition** — a simplified SM-2. Ratings **Again / Hard / Good / Easy** update each card's ease factor, interval, and next due date. Intervals are **capped at 7 days**, so every card comes back at least once or twice a week. Wrong answers reset a card to due-now.
 - **Review mode** — flip-card review of due cards with the four rating buttons.
 - **Vocabulary quiz** — ~20 questions per quiz, chosen by priority: due today → previously-wrong → difficult → longest-unreviewed (older cards fill the rest). Mixed question types: meaning MCQ, reverse MCQ, fill-in-the-blank from the example sentence, true/false. Scores and every answer are saved; wrong answers can be retried as practice.
@@ -74,6 +75,28 @@ Each card keeps an **ease factor** (starts 2.5) and an **interval** in days.
 | Easy | interval × ease ×1.3 (first time: 3 days), ease +0.1 |
 
 Intervals cap at **7 days**. Quiz answers map to ratings automatically (correct → Good, wrong → Again). Implementation: [lib/srs.ts](lib/srs.ts) · quiz card selection: [lib/quiz.ts](lib/quiz.ts).
+
+## Smart Definition & Example Assistant
+
+The Add/Edit Word form ([components/cards/CardForm.tsx](components/cards/CardForm.tsx)) has a built-in lookup assistant:
+
+1. Type a word or phrase (e.g. `meticulous` or `break the ice`).
+2. Focus the **Meaning** field (while it's empty) or click **✨ Suggest definition** — suggestion cards appear below the field with the definition, part of speech, phonetic spelling, synonyms/antonyms, source, and a pronunciation audio button when available. Click **Use this definition** to apply one; **Use pronunciation** / **Use as word type** fill those fields from the same card.
+3. Focus the **Example sentence** field or click **✨ Suggest example** to get example sentences, each with a **Use this example** button.
+4. Nothing is ever applied or overwritten automatically, and every field stays manually editable (including the Arabic translation, which is never auto-translated).
+
+**Free API sources** (no API keys, no paid AI/dictionary/TTS/translation services):
+
+| Source | Role |
+|---|---|
+| [dictionaryapi.dev](https://dictionaryapi.dev) | Primary definitions, part of speech, phonetics, audio, synonyms/antonyms, examples |
+| [FreeDictionaryAPI.com](https://freedictionaryapi.com) | Fallback definitions when dictionaryapi.dev has no result |
+| [Datamuse](https://www.datamuse.com/api/) | Spelling suggestions and related words/phrases when no exact definition exists (shown as "Related suggestions", never as definitions) |
+| [Tatoeba](https://tatoeba.org) | English example sentences; exact phrase first, then the phrase's main word |
+
+All external calls happen **server-side only**, centralized in [lib/dictionary.ts](lib/dictionary.ts) and exposed to the form through two internal routes: `GET /api/dictionary/lookup?term=…` and `GET /api/dictionary/examples?term=…`. Results are normalized (deduplicated, best 3–5 kept, very short/long examples dropped) and cached in the `DictionaryCache` table — definition and example lookups separately — so repeated lookups are instant and API-friendly. If a source is down the next one is tried, and the form always falls back cleanly to manual entry.
+
+Run the assistant's unit tests (parsers, normalization, fallbacks, caching) with `npm test`.
 
 ## Grammar question APIs
 

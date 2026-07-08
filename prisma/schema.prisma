@@ -107,6 +107,24 @@ model QuizAnswer {
   createdAt      DateTime      @default(now())
 }
 
+// Cached external dictionary lookups (dictionaryapi.dev, FreeDictionaryAPI,
+// Datamuse, Tatoeba) so the same term never hits the free APIs twice.
+// `data` holds the normalized lookup result as a JSON string (kept as String
+// for SQLite compatibility). Definition and example lookups are cached
+// separately via `type`.
+model DictionaryCache {
+  id             String   @id @default(cuid())
+  term           String // original display text as typed
+  normalizedTerm String // lowercased / trimmed lookup key
+  type           String // "definition" | "example"
+  source         String // primary source that produced the data
+  data           String // JSON payload (normalized suggestions)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([normalizedTerm, type])
+}
+
 // One row per SRS review of a flashcard (from review mode or a vocab quiz).
 model ReviewLog {
   id             String    @id @default(cuid())
