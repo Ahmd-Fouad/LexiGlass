@@ -10,6 +10,7 @@ import {
   questionsFromTopic,
   sortTopicsByWeakness,
   topicWeakness,
+  type GeneratedQuizQuestionInput,
   type TopicStatsMap,
 } from "../lib/grammar-quiz";
 
@@ -141,5 +142,51 @@ describe("buildGrammarQuiz", () => {
     const quiz = buildGrammarQuiz([strong, weak], { size: 12, topicStats: stats });
     const weakQuestions = quiz.filter((q) => q.grammarTopicId === weak.id);
     assert.ok(weakQuestions.length >= 2, `expected ≥2 weak-topic questions, got ${weakQuestions.length}`);
+  });
+
+  it("still builds a quiz with no saved generated questions (Phase 1 preserved)", () => {
+    const topic = makeTopic({ commonMistakes: "He go => He goes" });
+    const quiz = buildGrammarQuiz([topic], { size: 10, generatedQuestions: [] });
+    assert.equal(quiz.length, 10);
+    assert.ok(quiz.every((q) => !q.generatedQuestionId));
+  });
+
+  it("mixes in saved generated questions carrying their generatedQuestionId", () => {
+    const topic = makeTopic({ title: "Present perfect" });
+    const generated: GeneratedQuizQuestionInput[] = Array.from({ length: 6 }, (_, i) => ({
+      id: `gen_${i}`,
+      grammarTopicId: topic.id,
+      questionType: i % 2 === 0 ? "choose_correct" : "correct_mistake",
+      question: `Generated grammar question number ${i}?`,
+      choices: i % 2 === 0 ? ["a one", "b two", "c three", "d four"] : null,
+      correctAnswer: i % 2 === 0 ? "a one" : "the correct rewrite",
+      explanation: "Because of the rule.",
+    }));
+
+    const quiz = buildGrammarQuiz([topic], { size: 12, generatedQuestions: generated });
+    const fromPool = quiz.filter((q) => q.generatedQuestionId);
+    assert.ok(fromPool.length > 0, "expected some generated questions in the quiz");
+    for (const q of fromPool) {
+      assert.ok(q.generatedQuestionId?.startsWith("gen_"));
+      assert.equal(q.id, `gen_${q.generatedQuestionId}`);
+    }
+  });
+
+  it("only includes generated questions that were passed in (retired ones are excluded upstream)", () => {
+    const topic = makeTopic();
+    const generated: GeneratedQuizQuestionInput[] = [
+      {
+        id: "active_1",
+        grammarTopicId: topic.id,
+        questionType: "choose_correct",
+        question: "An active pool question?",
+        choices: ["w one", "x two", "y three", "z four"],
+        correctAnswer: "w one",
+        explanation: "Rule.",
+      },
+    ];
+    const quiz = buildGrammarQuiz([topic], { size: 12, generatedQuestions: generated });
+    const genIds = quiz.filter((q) => q.generatedQuestionId).map((q) => q.generatedQuestionId);
+    assert.ok(genIds.every((id) => id === "active_1"));
   });
 });

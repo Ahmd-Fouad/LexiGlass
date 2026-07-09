@@ -38,7 +38,12 @@ export type GrammarQuestionType =
   | "fill_blank"
   | "choose_correct"
   | "find_mistake"
-  | "correct_sentence";
+  | "correct_sentence"
+  // AI/local generated-question types (see lib/ai/providers/types.ts):
+  | "correct_mistake"
+  | "fill_gap"
+  | "rule_understanding"
+  | "sentence_transformation";
 
 /** How the cards for a vocabulary quiz are chosen. */
 export type VocabQuizMode = "standard" | "weak" | "mistakes" | "tag";
@@ -48,6 +53,8 @@ export interface QuizQuestion {
   id: string;
   flashcardId?: string;
   grammarTopicId?: string;
+  /** Set when the question came from the saved generated-question pool. */
+  generatedQuestionId?: string;
   type: VocabQuestionType | GrammarQuestionType;
   /** Whether the underlying card is a word or a phrase (affects answer checking). */
   kind?: "word" | "phrase";

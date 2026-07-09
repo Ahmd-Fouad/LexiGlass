@@ -6,6 +6,9 @@ import MistakeBank, {
   type GrammarMistakeDTO,
   type VocabMistakeDTO,
 } from "@/components/mistakes/MistakeBank";
+import GrammarMistakeRecords, {
+  type GrammarMistakeRecordDTO,
+} from "@/components/mistakes/GrammarMistakeRecords";
 
 export const metadata = { title: "Mistake Bank — LexiGlass" };
 
@@ -13,7 +16,7 @@ export default async function MistakesPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
 
-  const { vocab, grammar } = await getMistakeBank(userId);
+  const { vocab, grammar, grammarRecords } = await getMistakeBank(userId);
 
   const vocabDTO: VocabMistakeDTO[] = vocab.map((m) => ({
     ...m,
@@ -22,6 +25,12 @@ export default async function MistakesPage() {
   const grammarDTO: GrammarMistakeDTO[] = grammar.map((m) => ({
     ...m,
     lastMistakeAt: m.lastMistakeAt?.toISOString() ?? null,
+  }));
+  const grammarRecordsDTO: GrammarMistakeRecordDTO[] = grammarRecords.map((r) => ({
+    ...r,
+    lastMistakeAt: r.lastMistakeAt.toISOString(),
+    practicedAt: r.practicedAt?.toISOString() ?? null,
+    resolvedAt: r.resolvedAt?.toISOString() ?? null,
   }));
 
   return (
@@ -33,7 +42,7 @@ export default async function MistakesPage() {
         </p>
       </div>
 
-      {vocabDTO.length === 0 && grammarDTO.length === 0 ? (
+      {vocabDTO.length === 0 && grammarDTO.length === 0 && grammarRecordsDTO.length === 0 ? (
         <EmptyState
           title="No mistakes yet"
           hint="Complete a quiz or review session to generate mistake insights. Anything you miss lands here so you can fix it fast."
@@ -45,7 +54,10 @@ export default async function MistakesPage() {
           }
         />
       ) : (
-        <MistakeBank vocab={vocabDTO} grammar={grammarDTO} />
+        <>
+          <GrammarMistakeRecords records={grammarRecordsDTO} />
+          <MistakeBank vocab={vocabDTO} grammar={grammarDTO} />
+        </>
       )}
     </main>
   );

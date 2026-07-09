@@ -23,10 +23,36 @@ export interface TopicStats {
 
 export type TopicStatsMap = Map<string, TopicStats>;
 
+/** A saved generated question, mapped into the quiz. Weak-topic-first order preserved. */
+export interface GeneratedQuizQuestionInput {
+  id: string;
+  grammarTopicId: string;
+  questionType: string;
+  question: string;
+  choices: string[] | null;
+  correctAnswer: string;
+  explanation: string;
+}
+
 export interface GrammarQuizOptions {
   size?: number;
   /** Per-topic quiz history, used to prioritise weak topics. */
   topicStats?: TopicStatsMap;
+  /** Saved active generated questions to mix in (already prioritised by caller). */
+  generatedQuestions?: GeneratedQuizQuestionInput[];
+}
+
+function generatedToQuizQuestion(g: GeneratedQuizQuestionInput): QuizQuestion {
+  return {
+    id: `gen_${g.id}`,
+    grammarTopicId: g.grammarTopicId,
+    generatedQuestionId: g.id,
+    type: g.questionType as QuizQuestion["type"],
+    prompt: g.question,
+    options: g.choices && g.choices.length > 0 ? g.choices : undefined,
+    answer: g.correctAnswer,
+    explanation: g.explanation || undefined,
+  };
 }
 
 /**
@@ -48,9 +74,12 @@ export function buildGrammarQuiz(
   topics: GrammarTopic[],
   options: GrammarQuizOptions = {}
 ): QuizQuestion[] {
-  const { size = GRAMMAR_QUIZ_SIZE, topicStats } = options;
+  const { size = GRAMMAR_QUIZ_SIZE, topicStats, generatedQuestions = [] } = options;
 
-  // Weak topics first, and weaker topics may contribute more questions.
+  // Saved generated questions (already weak-topic-first from the caller).
+  const generated = generatedQuestions.map(generatedToQuizQuestion);
+
+  // Questions from the user's own topics (mistakes + examples), weak first.
   const ordered = sortTopicsByWeakness(topics, topicStats);
   const fromTopics: QuizQuestion[] = [];
   const topicBudget = Math.ceil(size / 2);
@@ -70,10 +99,8 @@ export function buildGrammarQuiz(
     q.topic.split(" ").some((w) => w.length > 3 && studied.includes(w))
   );
   const unrelated = GRAMMAR_BANK.filter((q) => !related.includes(q));
-
-  const needed = size - topicQuestions.length;
-  const fromBank = [...pickRandom(related, needed), ...pickRandom(unrelated, needed)]
-    .slice(0, needed)
+  const fromBank = [...pickRandom(related, size), ...pickRandom(unrelated, size)]
+    .slice(0, size)
     .map((q, i) => ({
       id: `bank_${i}_${q.topic.replace(/\s+/g, "_")}`,
       type: q.type,
@@ -84,7 +111,35 @@ export function buildGrammarQuiz(
       explanation: q.explanation,
     }));
 
-  return shuffle([...topicQuestions, ...fromBank]).slice(0, size);
+  // Priority fill (no duplicate prompts): user topic questions, then saved
+  // generated questions, then the local bank. Generated questions get the
+  // largest slice so the adaptive pool leads once it's populated.
+  const result: QuizQuestion[] = [];
+  const seen = new Set<string>();
+  const add = (list: QuizQuestion[], max: number) => {
+    for (const q of list) {
+      if (result.length >= size || max <= 0) break;
+      // Key on prompt + answer + options: many bank questions share a generic
+      // prompt ("Choose the correct sentence:") but differ in their choices.
+      const key = `${q.prompt}|${q.answer}|${(q.options ?? []).join("~")}`
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(q);
+      max--;
+    }
+  };
+
+  add(generated, Math.ceil(size * 0.5));
+  add(topicQuestions, Math.ceil(size * 0.4));
+  add(fromBank, size);
+  // Fill any remaining slots from whatever's left.
+  add(generated, size);
+  add(topicQuestions, size);
+
+  return shuffle(result).slice(0, size);
 }
 
 /** Generates questions from one saved grammar topic. */

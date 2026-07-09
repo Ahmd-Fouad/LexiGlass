@@ -16,6 +16,12 @@ import {
 } from "./analytics";
 import { isWeakCard, type RecentMistakeCounts } from "./review";
 import { buildDailyPlanItems, type DailyPlanSnapshot, type PlanItem } from "./study-plan";
+import {
+  activeRecordTopicIds,
+  excludeTopicsCoveredByRecords,
+  getGrammarMistakeRecords,
+  type GrammarMistakeRecord,
+} from "./grammar-mistakes";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -74,13 +80,24 @@ export async function getRecentMistakeCounts(
 export interface MistakeBankData {
   vocab: VocabMistakeItem[];
   grammar: GrammarMistakeItem[];
+  grammarRecords: GrammarMistakeRecord[];
 }
 
-/** Everything the Mistake Bank page needs, worst items first. */
+/**
+ * Everything the Mistake Bank page needs, worst items first.
+ *
+ * Grammar mistakes come from two sources that are deliberately kept
+ * separate: `grammarRecords` (per-question GrammarMistake rows from the
+ * adaptive AI question pool — supports practice/resolve) and `grammar`
+ * (topic-level QuizAnswer aggregation, covering the local bank and
+ * user-topic questions that have no GrammarMistake row). Topics that already
+ * have an active GrammarMistake record are excluded from `grammar` so the
+ * same underlying issue isn't shown twice.
+ */
 export async function getMistakeBank(userId: string): Promise<MistakeBankData> {
   const since = new Date(Date.now() - MISTAKE_WINDOW_DAYS * DAY_MS);
 
-  const [cards, topics, recentBadLogs, quizAnswers] = await Promise.all([
+  const [cards, topics, recentBadLogs, quizAnswers, grammarRecords] = await Promise.all([
     db.flashcard.findMany({ where: { userId } }),
     db.grammarTopic.findMany({
       where: { userId },
@@ -113,11 +130,16 @@ export async function getMistakeBank(userId: string): Promise<MistakeBankData> {
         createdAt: true,
       },
     }),
+    getGrammarMistakeRecords(userId),
   ]);
+
+  const grammarTopicMistakes = buildGrammarMistakes(topics, quizAnswers, {});
+  const coveredTopicIds = activeRecordTopicIds(grammarRecords);
 
   return {
     vocab: buildVocabMistakes(cards, recentBadLogs, quizAnswers, {}),
-    grammar: buildGrammarMistakes(topics, quizAnswers, {}),
+    grammar: excludeTopicsCoveredByRecords(grammarTopicMistakes, coveredTopicIds),
+    grammarRecords,
   };
 }
 

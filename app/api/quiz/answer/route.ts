@@ -3,10 +3,17 @@ import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { badRequest, str, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
 import { applyRating, ratingFromCorrectness } from "@/lib/srs";
+import {
+  activateReplacementQuestion,
+  recordWrongGrammarQuestion,
+  retireCorrectQuestion,
+} from "@/lib/grammar-question-pool";
 
 /**
- * Records one answered quiz question. For vocabulary questions it also
- * updates the card's spaced-repetition schedule (correct → "good", wrong → "again").
+ * Records one answered quiz question. For vocabulary questions it also updates
+ * the card's SRS schedule (correct → "good", wrong → "again"). For generated
+ * grammar questions it retires correct ones (mastered, never deleted) and
+ * routes wrong ones into the Grammar Mistake bank, topping up the pool.
  */
 export async function POST(req: Request) {
   try {
@@ -27,13 +34,15 @@ export async function POST(req: Request) {
 
     const flashcardId = str(body.flashcardId, 100);
     const grammarTopicId = str(body.grammarTopicId, 100);
+    const generatedQuestionId = str(body.generatedQuestionId, 100);
+    const questionType = strOrEmpty(body.questionType, 50) || "mcq";
 
-    await db.quizAnswer.create({
+    const answer = await db.quizAnswer.create({
       data: {
         sessionId,
         flashcardId: flashcardId ?? undefined,
         grammarTopicId: grammarTopicId ?? undefined,
-        questionType: strOrEmpty(body.questionType, 50) || "mcq",
+        questionType,
         question,
         correctAnswer,
         userAnswer,
@@ -72,6 +81,28 @@ export async function POST(req: Request) {
             },
           }),
         ]);
+      }
+    }
+
+    // Generated grammar questions: retire correct, bank wrong + top up pool.
+    if (generatedQuestionId) {
+      if (isCorrect) {
+        await retireCorrectQuestion(generatedQuestionId, userId);
+      } else {
+        await recordWrongGrammarQuestion({
+          userId,
+          grammarTopicId: grammarTopicId ?? null,
+          generatedQuestionId,
+          quizSessionId: sessionId,
+          quizAnswerId: answer.id,
+          question,
+          userAnswer,
+          correctAnswer,
+          explanation: strOrEmpty(body.explanation, 1000),
+          questionType,
+        });
+        // Non-blocking: activate/generate a replacement if the pool is low.
+        if (grammarTopicId) void activateReplacementQuestion(userId, grammarTopicId).catch(() => {});
       }
     }
 

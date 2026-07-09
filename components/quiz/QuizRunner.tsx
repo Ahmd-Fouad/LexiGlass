@@ -23,6 +23,10 @@ const TYPE_LABELS: Record<string, string> = {
   choose_correct: "Choose the correct sentence",
   find_mistake: "Find the mistake",
   correct_sentence: "Correct the sentence",
+  correct_mistake: "Correct the sentence",
+  fill_gap: "Fill the gap",
+  rule_understanding: "Grammar rule",
+  sentence_transformation: "Transform the sentence",
 };
 
 const VOCAB_MODES: { mode: VocabQuizMode; label: string; hint: string }[] = [
@@ -113,11 +117,13 @@ export default function QuizRunner({
           sessionId,
           flashcardId: question.flashcardId,
           grammarTopicId: question.grammarTopicId,
+          generatedQuestionId: question.generatedQuestionId,
           questionType: question.type,
           question: question.prompt + (question.context ? ` — ${question.context}` : ""),
           correctAnswer: question.answer,
           userAnswer,
           isCorrect,
+          explanation: question.explanation,
         },
       }).catch(() => {
         // Answer recording failures shouldn't interrupt the quiz.
@@ -306,6 +312,14 @@ export default function QuizRunner({
                   <p className="mt-2">
                     <LinkButton href={`/cards/${a.question.flashcardId}/edit`} variant="ghost" className="!px-3 !py-1 !text-xs">
                       Open card
+                    </LinkButton>
+                  </p>
+                )}
+                {!a.isCorrect && a.question.grammarTopicId && (
+                  <p className="mt-2 flex flex-wrap items-center gap-2">
+                    {a.question.generatedQuestionId && <Chip tone="amber">Added to Grammar Mistakes</Chip>}
+                    <LinkButton href="/mistakes" variant="ghost" className="!px-3 !py-1 !text-xs">
+                      Practice this later
                     </LinkButton>
                   </p>
                 )}

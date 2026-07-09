@@ -35,6 +35,8 @@ Demo account (after seeding): **demo@lexiglass.app / demo1234**
 
 A working `.env` is included for local development — **change `AUTH_SECRET` before deploying** and never commit real secrets.
 
+**Secret handling**: `.env.example` is a template with no real values — it's committed and safe to share. `.env` (and `.env.local` / `.env.*.local`) hold your actual secrets and are gitignored; never commit them. All AI provider API keys are read with `process.env` on the server only (see `lib/ai/providers/`) — they are never sent to the client, never stored in the database, and never logged.
+
 ## Database
 
 Schema lives in [prisma/schema.prisma](prisma/schema.prisma) with migrations under `prisma/migrations/`:
