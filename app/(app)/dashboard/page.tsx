@@ -2,14 +2,100 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { getDashboardStats } from "@/lib/stats";
-import { GlassCard, LinkButton } from "@/components/ui";
+import { buildDailyStudyPlan } from "@/lib/learning-data";
+import { isPlanDone, planMinutesLeft, type PlanItem } from "@/lib/study-plan";
+import { Chip, GlassCard, LinkButton } from "@/components/ui";
 
 export const metadata = { title: "Dashboard — LexiGlass" };
+
+const STATUS_LABELS: Record<PlanItem["status"], string> = {
+  not_started: "Not started",
+  in_progress: "In progress",
+  completed: "Completed",
+};
+
+function DailyPlan({ items }: { items: PlanItem[] }) {
+  const done = isPlanDone(items);
+  const minutesLeft = planMinutesLeft(items);
+
+  return (
+    <GlassCard className="p-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">
+          Today&apos;s study plan
+        </h2>
+        {!done && minutesLeft > 0 && (
+          <span className="text-xs text-ink-muted">~{minutesLeft} min left</span>
+        )}
+      </div>
+
+      {done ? (
+        <div className="mt-4 text-center">
+          <p className="font-display text-2xl">You&apos;re done for today 🎉</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-ink-muted">
+            Everything on the plan is finished. Add new words, or come back tomorrow when the next cards are due.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-3">
+            <LinkButton href="/cards/new">+ Add words</LinkButton>
+            <LinkButton href="/mistakes" variant="ghost">Open Mistake Bank</LinkButton>
+          </div>
+        </div>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {items.map((item) => {
+            const completed = item.status === "completed";
+            return (
+              <li
+                key={item.id}
+                className={`flex flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:flex-row sm:items-center sm:justify-between ${
+                  completed ? "opacity-60" : ""
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span aria-hidden className={completed ? "text-teal-glow" : "text-ink-muted"}>
+                      {completed ? "✓" : item.status === "in_progress" ? "◐" : "○"}
+                    </span>
+                    <p className={`font-medium ${completed ? "line-through decoration-white/30" : ""}`}>
+                      {item.title}
+                    </p>
+                    {item.priority === "high" && !completed && <Chip tone="rose">priority</Chip>}
+                    <Chip
+                      tone={completed ? "teal" : item.status === "in_progress" ? "amber" : "neutral"}
+                    >
+                      {STATUS_LABELS[item.status]}
+                    </Chip>
+                  </div>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    {item.reason}
+                    {!completed && item.minutes > 0 && ` · ~${item.minutes} min`}
+                  </p>
+                </div>
+                {!completed && (
+                  <LinkButton
+                    href={item.href}
+                    variant={item.priority === "high" ? "primary" : "ghost"}
+                    className="shrink-0 !px-4 !py-2 !text-xs"
+                  >
+                    {item.cta}
+                  </LinkButton>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </GlassCard>
+  );
+}
 
 export default async function DashboardPage() {
   const user = await getSessionUser();
   if (!user) redirect("/login");
-  const stats = await getDashboardStats(user.id);
+  const [stats, plan] = await Promise.all([
+    getDashboardStats(user.id),
+    buildDailyStudyPlan(user.id),
+  ]);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -60,6 +146,11 @@ export default async function DashboardPage() {
           </div>
         </div>
       </GlassCard>
+
+      {/* Smart daily study plan */}
+      <section aria-label="Today's study plan">
+        <DailyPlan items={plan} />
+      </section>
 
       {/* Stat tiles */}
       <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6" aria-label="Study statistics">

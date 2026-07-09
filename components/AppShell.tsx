@@ -11,6 +11,7 @@ const NAV = [
   { href: "/quiz/vocab", label: "Vocab quiz", icon: "?" },
   { href: "/grammar", label: "Grammar", icon: "¶" },
   { href: "/quiz/grammar", label: "Grammar quiz", icon: "✎" },
+  { href: "/mistakes", label: "Mistake Bank", icon: "⚑" },
   { href: "/stats", label: "Progress", icon: "∿" },
 ];
 

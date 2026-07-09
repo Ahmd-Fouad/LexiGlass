@@ -1,0 +1,597 @@
+# LexiGlass Project Brief for Claude/Codex
+
+You are working on LexiGlass, a full-stack English study companion app.
+
+## 1. Product purpose
+
+LexiGlass is a personal English learning app for vocabulary, phrases, grammar topics, spaced repetition, quizzes, and progress tracking.
+
+The goal is to make it feel like a serious English learning product, not just a simple flashcard CRUD app.
+
+The user is learning English around B1 to B2 level and wants the app to help with:
+
+- saving useful words and phrases
+- adding English definitions
+- adding Arabic translations manually
+- adding example sentences
+- reviewing vocabulary with spaced repetition
+- taking vocabulary and grammar quizzes
+- tracking weak words and progress
+- practicing real useful English phrases
+
+## 2. Tech stack
+
+The app uses:
+
+- Next.js 15 App Router
+- React 19
+- TypeScript
+- Tailwind CSS v4
+- Prisma
+- SQLite for local development
+- bcrypt for password hashing
+- jose JWT cookies for authentication
+- Server-side Prisma queries
+- Custom local UI components
+- Dark glassmorphism UI
+
+Local database is SQLite, but deployment should use PostgreSQL such as Supabase, Neon, or Vercel Postgres.
+
+## 3. Existing core features
+
+The app already has:
+
+- Register/login with email and password
+- JWT session cookies lasting 30 days
+- Middleware-protected app routes
+- Per-user data isolation
+- Dashboard
+- Flashcards
+- Grammar topics
+- SRS review mode
+- Vocabulary quiz
+- Grammar quiz
+- Stats/progress page
+- Seed data and demo account
+
+Main database models:
+
+- User
+- Flashcard
+- GrammarTopic
+- QuizSession
+- QuizAnswer
+- ReviewLog
+- DictionaryCache
+
+## 4. Important auth/security behavior
+
+Every user's data must remain isolated.
+
+For every read, update, delete, review, quiz, or stats action, always verify ownership using the logged-in user ID.
+
+Correct pattern:
+
+```ts
+where: {
+  id: itemId,
+  userId: currentUser.id
+}
+```
+
+Avoid unsafe access like:
+
+```ts
+where: {
+  id: itemId
+}
+```
+
+JWT cookies must remain httpOnly. In production, cookies should use secure settings.
+
+## 5. Flashcard behavior
+
+Flashcards are used for both words and phrases.
+
+Flashcards include:
+
+- word or phrase text
+- meaning / English definition
+- Arabic translation
+- example sentence
+- difficulty
+- tags/category
+- review state
+- SRS fields
+- review history
+
+Important current UI decision:
+
+The Add/Edit Word form should not show the lower optional fields:
+
+- Pronunciation input
+- Word type input
+
+Do not delete the database fields if they exist. Just keep them hidden for now.
+
+Also remove/hide suggestion buttons like:
+
+- Use pronunciation
+- Use as word type
+
+But keep the top Type dropdown, because the user still needs to choose:
+
+- Word
+- Phrase
+
+## 6. Spaced repetition behavior
+
+The app uses a simplified SM-2 system.
+
+Ratings:
+
+- Again
+- Hard
+- Good
+- Easy
+
+Rules:
+
+- Again resets card to due now
+- Hard gives small progress
+- Good increases interval
+- Easy increases interval more
+- Intervals are capped at 7 days
+- Wrong quiz answers map to Again
+- Correct quiz answers map to Good
+
+Important file:
+
+```txt
+lib/srs.ts
+```
+
+Do not break the 7-day interval cap unless explicitly requested.
+
+## 7. Vocabulary quiz behavior
+
+Vocabulary quiz should choose cards by priority:
+
+1. due cards
+2. previously wrong cards
+3. difficult cards
+4. older / longest-unreviewed cards
+
+Question types include:
+
+- meaning multiple choice
+- reverse multiple choice
+- fill-in-the-blank from example sentence
+- true/false
+- cloze-style questions if added
+
+Important file:
+
+```txt
+lib/quiz.ts
+```
+
+## 8. Grammar behavior
+
+Grammar topics include:
+
+- title
+- explanation
+- examples
+- common mistakes in `wrong => right` format
+- notes
+- tags
+- difficulty
+
+Grammar quiz is generated from:
+
+- saved grammar topics
+- local built-in grammar question bank
+
+Important files:
+
+```txt
+lib/grammar-quiz.ts
+lib/grammar-bank.ts
+```
+
+No paid AI API should be required for grammar questions.
+
+## 9. Smart Definition and Example Assistant
+
+This is an important feature inside the Flashcard Add/Edit form.
+
+The purpose:
+
+When the user types a word or phrase, the app helps suggest:
+
+- English definition
+- example sentence
+- synonyms/antonyms as helper text if available
+- phonetic/audio only as helper metadata, not as visible form fields for now
+
+The assistant must be inside the Add/Edit Word form, not a separate dictionary page.
+
+User flow:
+
+1. User types a word or phrase.
+2. User focuses the Meaning field or clicks Suggest definition.
+3. Definition suggestions appear.
+4. Nothing is applied automatically.
+5. User clicks Use this definition.
+6. User focuses the Example field or clicks Suggest example.
+7. Example suggestions appear.
+8. User clicks Use this example.
+9. User can always write manually.
+
+## 10. Free language APIs used
+
+Use only free, keyless APIs. Do not use paid AI APIs.
+
+Allowed sources:
+
+### Built-in local phrase dictionary
+
+File:
+
+```txt
+lib/local-phrase-dictionary.ts
+```
+
+Used for curated phrase definitions and examples.
+
+This should be checked first for phrases.
+
+It includes phrases like:
+
+- winning formula
+- get rid of
+- look forward to
+- come up with
+- figure out
+- take care of
+- deal with
+- carry out
+- point out
+- rely on
+- run into
+- set up
+- break down
+- keep track of
+- make sure
+
+### dictionaryapi.dev
+
+Primary source for single-word definitions.
+
+Used for:
+
+- definitions
+- part of speech
+- phonetics
+- audio URL
+- synonyms
+- antonyms
+- examples if available
+
+### FreeDictionaryAPI.com
+
+Fallback dictionary source if dictionaryapi.dev has no useful result.
+
+### Datamuse API
+
+Not a dictionary.
+
+Use only for:
+
+- related words
+- spelling suggestions
+- similar words
+- phrase suggestions
+
+Datamuse results must be labeled as:
+
+```txt
+Related suggestions
+```
+
+Never show Datamuse suggestions as real definitions.
+
+### Tatoeba
+
+Used for example sentences.
+
+For phrase inputs, Tatoeba examples must contain the exact full phrase.
+
+## 11. Phrase handling rules
+
+Phrase handling is critical.
+
+For phrases like:
+
+- winning formula
+- get rid of
+- look forward to
+
+Never fallback to one random word and show unrelated examples.
+
+Bad example:
+
+```txt
+Term: winning formula
+Example: He deserved to win.
+```
+
+This is unacceptable because it only contains "win", not "winning formula".
+
+Correct example:
+
+```txt
+After several failed attempts, we finally found a winning formula for improving our study routine.
+```
+
+For phrase inputs:
+
+- definition lookup should check local phrase dictionary first
+- examples must contain the full exact phrase
+- if no exact example exists, show a clean empty state
+- do not show weak examples by default
+
+## 12. Current dictionary lookup priority
+
+For phrases:
+
+1. Local phrase dictionary exact match
+2. dictionaryapi.dev exact lookup
+3. FreeDictionaryAPI exact lookup
+4. Datamuse related suggestions only
+
+For single words:
+
+1. dictionaryapi.dev
+2. FreeDictionaryAPI
+3. local fallback examples if available
+4. Datamuse related suggestions only
+
+## 13. Example quality rules
+
+Examples should be useful for English learning.
+
+Good examples:
+
+```txt
+I need to get rid of old files to free up space on my laptop.
+The company restricts access to sensitive project files.
+After several failed attempts, we finally found a winning formula for improving our study routine.
+```
+
+Bad examples:
+
+```txt
+Get rid of it.
+There are no restrictions.
+He deserved to win.
+```
+
+Example scoring should:
+
+- prefer examples containing the exact target
+- require exact full phrase for phrases
+- prefer 8 to 22 words
+- penalize very short examples
+- penalize very long examples
+- remove duplicates
+- remove fragments
+- keep best 3 to 5 examples
+
+Important helper:
+
+```ts
+scoreExampleSentence(sentence: string, term: string): number
+```
+
+## 14. Definition quality rules
+
+Definition suggestions should be clear and practical.
+
+Prefer:
+
+- short, clear definitions
+- natural learner-friendly meanings
+- local phrase dictionary definitions for phrases
+
+Avoid:
+
+- one-word definitions
+- overly technical definitions unless no better option exists
+- duplicate definitions
+
+Important helper:
+
+```ts
+scoreDefinitionSuggestion(...)
+```
+
+## 15. Dictionary cache behavior
+
+Dictionary and example lookups are cached in the database.
+
+Model:
+
+```txt
+DictionaryCache
+```
+
+Definitions and examples should be cached separately.
+
+Important:
+
+Cache has versioning. If lookup quality rules change, bump cache version or include strategy/version in cache key.
+
+Reason:
+
+Old bad results like weak "winning formula" examples must not keep appearing forever.
+
+Expected behavior:
+
+- check cache first
+- ignore old cache version
+- fetch fresh result if cache is old
+- store normalized result
+- return clean response
+
+## 16. Current verified status from latest work
+
+Recent fixes already done or expected to be preserved:
+
+- Production build issue with `Input ref` was fixed using `React.forwardRef`.
+- Smart Definition and Example Assistant was added.
+- Local phrase dictionary was added.
+- "winning formula" now gets a real definition.
+- "winning formula" example must include full phrase.
+- "get rid of" gets a useful definition and useful example.
+- "restrict" examples were improved.
+- Pronunciation and lower Word Type inputs were hidden from the form.
+- "Use pronunciation" and "Use as word type" buttons were removed.
+- Dictionary tests were updated.
+- 54 tests passed in the latest Claude run.
+- `npm run build` passed in the latest Claude run.
+
+Do not regress these behaviors.
+
+## 17. Testing expectations
+
+Use a free testing setup such as Vitest.
+
+Important tests:
+
+- SRS rating logic
+- interval cap at 7 days
+- Again resets due date to now
+- Easy increases interval
+- quiz card selection priority
+- dictionary term normalization
+- dictionaryapi.dev parser
+- FreeDictionaryAPI parser
+- Datamuse fallback parser
+- Tatoeba example parser
+- local phrase dictionary exact match
+- "winning formula" definition exists
+- "winning formula" example contains full phrase
+- "winning formula" does not show weak "win" examples
+- "get rid of" returns a useful example longer than 5 words
+- "restrict" returns useful examples
+- phrase examples require exact phrase match
+- old cache version is ignored
+- removed fields do not break create/edit
+
+Run:
+
+```bash
+npm test
+npm run build
+```
+
+## 18. Features planned next
+
+Future high-value free features:
+
+1. Mistake Bank
+2. Smart Daily Study Plan
+3. Weakness Analytics
+4. Cloze Cards
+5. Writing Practice Mode
+6. Pronunciation Practice using browser APIs
+7. Topic-Based Decks / Study Collections
+8. PWA and Offline Review
+9. Browser Notifications / Study Reminder
+10. Gamification
+11. Light Mode
+12. Accessibility and UX improvements
+13. More tests
+14. Security and ownership audit
+15. Portfolio README polish
+
+Do not start all at once unless explicitly asked. Implement one feature at a time and keep the build passing.
+
+## 19. Recommended next feature priority
+
+The best next feature is:
+
+```txt
+Mistake Bank + Smart Daily Study Plan + Weakness Analytics
+```
+
+Reason:
+
+These use data already saved in the app:
+
+- QuizAnswer
+- QuizSession
+- ReviewLog
+- Flashcard
+- GrammarTopic
+
+They add high product value without paid APIs.
+
+## 20. Development rules
+
+When modifying the project:
+
+- inspect existing files first
+- preserve architecture
+- do not rewrite the whole app
+- do not remove existing features
+- do not use paid APIs
+- do not use AI APIs unless explicitly requested later
+- keep external API calls server-side
+- centralize reusable logic in `lib/`
+- centralize reusable UI in `components/`
+- keep TypeScript strict
+- avoid `any`
+- preserve the dark glassmorphism design
+- make UI mobile-friendly
+- do not overwrite user input automatically
+- keep fields manually editable
+- run tests
+- run production build
+
+## 21. Commands commonly needed
+
+```bash
+npm install
+npx prisma generate
+npx prisma migrate dev
+npm run db:seed
+npm run dev
+npm test
+npm run build
+```
+
+If schema changes are added:
+
+```bash
+npx prisma migrate dev --name meaningful_migration_name
+npx prisma generate
+```
+
+## 22. Final response format after any coding task
+
+After making changes, report:
+
+1. Summary of changes
+2. Files changed
+3. New files created
+4. New routes added
+5. Prisma models/fields changed
+6. Migration name if created
+7. Tests added/updated
+8. Commands run
+9. Build result
+10. Known limitations
+11. Suggested next step

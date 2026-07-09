@@ -40,12 +40,19 @@ export type GrammarQuestionType =
   | "find_mistake"
   | "correct_sentence";
 
+/** How the cards for a vocabulary quiz are chosen. */
+export type VocabQuizMode = "standard" | "weak" | "mistakes" | "tag";
+
 export interface QuizQuestion {
   /** Unique within the quiz. */
   id: string;
   flashcardId?: string;
   grammarTopicId?: string;
   type: VocabQuestionType | GrammarQuestionType;
+  /** Whether the underlying card is a word or a phrase (affects answer checking). */
+  kind?: "word" | "phrase";
+  /** Tags of the underlying card (used for the weak-tags breakdown). */
+  tags?: string[];
   prompt: string;
   /** Extra context shown under the prompt (e.g. the example sentence). */
   context?: string;

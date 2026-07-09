@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     const next = applyRating(card, rating);
     const wasCorrect = ratingWasCorrect(rating);
 
-    const [updated] = await db.$transaction([
+    const [updated, log] = await db.$transaction([
       db.flashcard.update({
         where: { id: card.id },
         data: {
@@ -51,7 +51,20 @@ export async function POST(req: Request) {
       }),
     ]);
 
-    return NextResponse.json({ card: updated });
+    // The pre-rating SRS state lets the client offer "Undo last rating"
+    // (see /api/review/undo). Only ever applies to the user's own card.
+    return NextResponse.json({
+      card: updated,
+      undo: {
+        reviewLogId: log.id,
+        previous: {
+          easeFactor: card.easeFactor,
+          intervalDays: card.intervalDays,
+          dueDate: card.dueDate.toISOString(),
+          lastReviewedAt: card.lastReviewedAt?.toISOString() ?? null,
+        },
+      },
+    });
   } catch (e) {
     return toErrorResponse(e);
   }
