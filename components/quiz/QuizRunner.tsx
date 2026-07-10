@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { api } from "@/lib/client";
-import { answersMatch, checkClozeAnswer } from "@/lib/quiz";
+import { answersMatch } from "@/lib/quiz";
+import { checkClozeAnswer } from "@/lib/cloze";
 import { Button, Chip, ErrorBanner, GlassCard, Input, LinkButton, Select, Spinner } from "@/components/ui";
 import type { QuizQuestion, StartQuizResponse, VocabQuizMode } from "@/lib/types";
 
@@ -92,7 +93,7 @@ export default function QuizRunner({
   function checkTypedAnswer(q: QuizQuestion, userAnswer: string): boolean {
     // Vocabulary cloze: phrase cards need the full phrase, words tolerate one typo.
     if (q.type === "fill_blank" && q.flashcardId) {
-      return checkClozeAnswer(userAnswer, q.answer, q.kind ?? "word");
+      return checkClozeAnswer(userAnswer, q.answer, { kind: q.kind ?? "word" });
     }
     return answersMatch(q.answer, userAnswer);
   }

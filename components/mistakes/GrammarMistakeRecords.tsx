@@ -58,6 +58,7 @@ export default function GrammarMistakeRecords({ records }: { records: GrammarMis
             type="button"
             onClick={() => setFilter(f)}
             aria-pressed={filter === f}
+            data-testid={`grammar-mistake-filter-${f}`}
             className={`rounded-full border px-3.5 py-1.5 text-sm font-medium capitalize transition-colors ${
               filter === f
                 ? "border-violet-glow/60 bg-violet-glow/20 text-violet-100"
@@ -141,7 +142,7 @@ function MistakeRecordCard({
   }
 
   return (
-    <div className="rounded-xl bg-white/5 p-4">
+    <div className="rounded-xl bg-white/5 p-4" data-testid={`grammar-mistake-record-${record.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm">{record.question}</p>
@@ -184,6 +185,7 @@ function MistakeRecordCard({
                 <button
                   key={choice}
                   type="button"
+                  data-testid={`grammar-mistake-choice-${record.id}-${choice}`}
                   disabled={busy}
                   onClick={() => submitPractice(choice)}
                   className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-sm hover:bg-white/10 disabled:opacity-50"

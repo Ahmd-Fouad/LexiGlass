@@ -9,13 +9,40 @@ import { cardTags, type CardDTO } from "./card-dto";
 
 type StatusFilter = "all" | "due" | "recent" | "weak";
 
-export default function CardsBrowser({ cards, initialKind }: { cards: CardDTO[]; initialKind?: string }) {
+const STATUS_VALUES: StatusFilter[] = ["all", "due", "recent", "weak"];
+const DIFFICULTY_VALUES = ["all", "easy", "medium", "hard"];
+
+export default function CardsBrowser({
+  cards,
+  initialKind,
+  initialTag,
+  initialDifficulty,
+  initialStatus,
+  initialSearch,
+}: {
+  cards: CardDTO[];
+  initialKind?: string;
+  initialTag?: string;
+  initialDifficulty?: string;
+  initialStatus?: string;
+  initialSearch?: string;
+}) {
   const router = useRouter();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch ?? "");
   const [kind, setKind] = useState(initialKind === "word" || initialKind === "phrase" ? initialKind : "all");
-  const [difficulty, setDifficulty] = useState("all");
-  const [tag, setTag] = useState("all");
-  const [status, setStatus] = useState<StatusFilter>("all");
+  const [difficulty, setDifficulty] = useState(
+    initialDifficulty && DIFFICULTY_VALUES.includes(initialDifficulty) ? initialDifficulty : "all"
+  );
+  const [tag, setTag] = useState(() => {
+    const want = initialTag?.trim().toLowerCase();
+    if (!want) return "all";
+    // Resolve to the actual tag casing on the cards so the filter select matches.
+    const match = [...new Set(cards.flatMap(cardTags))].find((t) => t.toLowerCase() === want);
+    return match ?? "all";
+  });
+  const [status, setStatus] = useState<StatusFilter>(
+    STATUS_VALUES.includes(initialStatus as StatusFilter) ? (initialStatus as StatusFilter) : "all"
+  );
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

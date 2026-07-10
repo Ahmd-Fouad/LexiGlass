@@ -10,11 +10,17 @@ export const metadata = { title: "Flashcards — LexiGlass" };
 export default async function CardsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string }>;
+  searchParams: Promise<{
+    kind?: string;
+    tag?: string;
+    difficulty?: string;
+    status?: string;
+    q?: string;
+  }>;
 }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
-  const { kind } = await searchParams;
+  const { kind, tag, difficulty, status, q } = await searchParams;
 
   const cards = await db.flashcard.findMany({
     where: { userId },
@@ -33,7 +39,14 @@ export default async function CardsPage({
           <LinkButton href="/cards/new">+ Add card</LinkButton>
         </div>
       </div>
-      <CardsBrowser cards={cards.map(toCardDTO)} initialKind={kind} />
+      <CardsBrowser
+        cards={cards.map(toCardDTO)}
+        initialKind={kind}
+        initialTag={tag}
+        initialDifficulty={difficulty}
+        initialStatus={status}
+        initialSearch={q}
+      />
     </main>
   );
 }

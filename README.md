@@ -12,6 +12,10 @@ A full-stack flashcard and grammar study app with a spaced-repetition system, bu
 - **Vocabulary quiz** — ~20 questions per quiz, chosen by priority: due today → previously-wrong → difficult → longest-unreviewed (older cards fill the rest). Mixed question types: meaning MCQ, reverse MCQ, fill-in-the-blank from the example sentence, true/false. Scores and every answer are saved; wrong answers can be retried as practice.
 - **Grammar topics** — title, explanation, examples, common mistakes (`wrong => right` format), notes, tags, difficulty. Add / edit / delete / search.
 - **Grammar quiz** — questions generated **from your own topics** (examples become "choose the correct sentence", mistakes become "correct the sentence" / "find the mistake") plus a built-in local bank of ~40 questions that leans toward topics you've studied. No external API, no API keys.
+- **Cloze practice** — active recall by typing the target word/phrase back into its own example sentence. Used in the vocabulary quiz (fill-in-the-blank questions) and as an optional challenge in review mode. Phrases require the full phrase; single words tolerate one small typo. Shared logic in [lib/cloze.ts](lib/cloze.ts).
+- **Writing practice** (`/writing`) — pick 3–10 target words/phrases (weak / due / recent mistakes / random / by tag / difficult phrases) and write real sentences with them. Your writing is checked **locally with rules** (target usage, complete phrases, word/sentence counts, punctuation, capitalization, repeated words, possible spelling slips) and scored 0–100. Attempts are saved for progress. No AI.
+- **Study collections** (`/collections`) — ready-made study sets built from your cards: Due today, Weak words, Recent mistakes, Difficult phrases, Mastered, plus auto-generated sets by tag, category and difficulty. Each collection links straight to review, quiz, writing practice, or the filtered card list.
+- **Pronunciation practice** (`/pronunciation`) — listen to a word/phrase/sentence (browser text-to-speech), say it out loud, and get a local similarity score with matched / missed / extra words. Uses browser speech APIs only; gracefully falls back to listen-only when speech recognition isn't available.
 - **Progress page** — daily reviews (14-day chart), accuracy over 6 weeks, most difficult words, mastered count, quiz history, streak.
 - **Auth** — email/password accounts (bcrypt-hashed) with signed httpOnly JWT session cookies; every user's data is isolated.
 
@@ -46,6 +50,7 @@ Schema lives in [prisma/schema.prisma](prisma/schema.prisma) with migrations und
 - **GrammarTopic** — explanation, examples, common mistakes, tags
 - **QuizSession** / **QuizAnswer** — every quiz and every answered question
 - **ReviewLog** — one row per SRS review (feeds charts, accuracy, and streak)
+- **WritingAttempt** — one saved Writing Practice attempt (mode, target words, text, rule-based feedback JSON, 0–100 score). Added by migration `add_writing_attempt`.
 
 ### Switching to Supabase / PostgreSQL
 
@@ -114,20 +119,38 @@ app/
   (auth)/login, register     auth pages
   (app)/dashboard            stats overview + quick actions
   (app)/cards[, new, edit]   flashcard list, filters, forms
-  (app)/review               flip-card SRS review
+  (app)/review               flip-card SRS review (with optional cloze)
   (app)/quiz/vocab, grammar  quiz modes
   (app)/grammar[, new, edit] grammar topics
+  (app)/collections          topic/status study collections
+  (app)/writing              rule-based writing practice
+  (app)/pronunciation        browser speech pronunciation practice
+  (app)/mistakes             Mistake Bank
   (app)/stats                progress charts + history
-  api/...                    REST endpoints (auth, cards, grammar, review, quiz)
+  api/...                    REST endpoints (auth, cards, grammar, review, quiz,
+                             writing, pronunciation)
 components/                  UI kit, shell, feature components
-lib/                         db, auth, srs, quiz builders, stats
+lib/                         db, auth, srs, quiz/cloze/writing/collections/
+                             pronunciation logic, analytics, stats
 prisma/                      schema, migrations, seed
 middleware.ts                session check + redirects
 ```
 
+## Active practice modes (browser APIs, no paid services)
+
+Pronunciation practice uses only browser-native Web Speech APIs:
+
+- **`window.speechSynthesis`** — text-to-speech for the "Listen" buttons (word, phrase, example sentence, and pronunciation targets).
+- **`SpeechRecognition` / `webkitSpeechRecognition`** — captures what you say for the local comparison.
+
+All comparison and scoring (pronunciation similarity, writing feedback, cloze checking) run **locally** — no paid TTS, speech, or AI service is used anywhere. Speech recognition support varies by browser (best in Chrome/Edge on desktop and Android); where it's missing, pronunciation practice stays fully usable in listen-only mode.
+
 ## Limitations & future ideas
 
 - **Retry-wrong is practice-only** — retries don't overwrite the saved quiz result (by design).
+- **Speech recognition** isn't available in every browser (notably Firefox and iOS Safari at time of writing) — those users get text-to-speech and the listen-only fallback.
+- **Cloze suggested ratings** in review are suggestions only — you still choose the SRS rating, so the 7-day interval logic is never overridden automatically.
+- **Writing feedback is rule-based**, not grammar-perfect — it catches usage, structure and mechanics issues, not every subtle error (by design: no AI).
 - **Light mode** — the UI is dark-only; the token system in `globals.css` makes a light theme straightforward to add.
-- **Audio pronunciation** (text-to-speech), **CSV/Anki import-export**, **per-tag decks**, and **AI-generated grammar questions** would all be natural next steps.
+- **CSV/Anki import-export**, **PWA/offline**, and **study reminders** would all be natural next steps.
 - Sessions last 30 days; there's no password-reset flow yet.

@@ -282,19 +282,6 @@ export function isCorrectAnswer(
   return correct.length >= 5 && levenshtein(user, correct) <= 1;
 }
 
-/**
- * Checks a cloze (fill-in-the-blank) answer.
- * Phrase cards require the exact full phrase; words get small typo tolerance.
- */
-export function checkClozeAnswer(
-  userAnswer: string,
-  target: string,
-  kind: "word" | "phrase" = "word"
-): boolean {
-  if (kind === "phrase") return normalizeAnswer(userAnswer) === normalizeAnswer(target);
-  return isCorrectAnswer(userAnswer, target, { kind });
-}
-
 /** Classic dynamic-programming edit distance (insert/delete/substitute). */
 export function levenshtein(a: string, b: string): number {
   if (a === b) return 0;

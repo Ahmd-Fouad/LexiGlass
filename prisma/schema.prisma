@@ -24,6 +24,7 @@ model User {
   generatedQuestions GeneratedGrammarQuestion[]
   grammarMistakes    GrammarMistake[]
   aiGenerationLogs   AIGenerationLog[]
+  writingAttempts    WritingAttempt[]
 }
 
 // A flashcard is either a word or a phrase (kind field).
@@ -219,6 +220,25 @@ model DictionaryCache {
   updatedAt      DateTime @updatedAt
 
   @@unique([normalizedTerm, type])
+}
+
+// One saved Writing Practice attempt. The user writes sentences/a paragraph
+// using a set of target words/phrases; the attempt is analysed locally (no AI)
+// and stored for progress tracking. `promptWords` holds the target list and
+// `feedback` the full rule-based analysis, both as JSON.
+model WritingAttempt {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode        String // weak | due | mistakes | random | tag | phrases
+  promptWords Json // WritingTarget[] the attempt was written against
+  text        String // the user's writing
+  feedback    Json // WritingFeedback (used/missing words, warnings, etc.)
+  score       Int      @default(0) // 0-100 overall score
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, createdAt])
 }
 
 // One row per SRS review of a flashcard (from review mode or a vocab quiz).

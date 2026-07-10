@@ -7,7 +7,6 @@ import type { Flashcard } from "@prisma/client";
 import {
   answersMatch,
   buildVocabQuestions,
-  checkClozeAnswer,
   isCorrectAnswer,
   levenshtein,
   normalizeAnswer,
@@ -236,19 +235,6 @@ describe("answer checking", () => {
     assert.ok(!isCorrectAnswer("rid", "get rid of", { kind: "phrase" }));
     assert.ok(!isCorrectAnswer("get rid", "get rid of", { kind: "phrase" }));
     assert.ok(isCorrectAnswer("get rid of", "get rid of", { kind: "phrase" }));
-  });
-
-  it("checkClozeAnswer requires the exact full phrase for phrase cards", () => {
-    assert.ok(checkClozeAnswer("winning formula", "winning formula", "phrase"));
-    assert.ok(checkClozeAnswer("Winning Formula!", "winning formula", "phrase"));
-    assert.ok(!checkClozeAnswer("formula", "winning formula", "phrase"));
-    assert.ok(!checkClozeAnswer("winning", "winning formula", "phrase"));
-    assert.ok(!checkClozeAnswer("winnin formula", "winning formula", "phrase")); // no typo tolerance
-  });
-
-  it("checkClozeAnswer tolerates one typo for single words", () => {
-    assert.ok(checkClozeAnswer("restrictt", "restrict", "word"));
-    assert.ok(!checkClozeAnswer("restraint", "restrict", "word"));
   });
 
   it("levenshtein computes edit distance", () => {

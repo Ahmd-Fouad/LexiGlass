@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/client";
-import { Button, Chip, ErrorBanner, GlassCard, LinkButton } from "@/components/ui";
+import { Button, Chip, ErrorBanner, GlassCard, Input, LinkButton } from "@/components/ui";
 import type { CardDTO } from "@/components/cards/card-dto";
+import { buildClozeFromCard, evaluateCloze, type ClozeResult } from "@/lib/cloze";
 import type { Rating } from "@/lib/srs";
+import SpeakButton from "@/components/pronunciation/SpeakButton";
 
 const RATINGS: { rating: Rating; label: string; detail: string; key: string; classes: string }[] = [
   { rating: "again", label: "Again", detail: "today", key: "1", classes: "!border-rose-glow/40 text-rose-200 hover:!bg-rose-glow/15" },
@@ -50,9 +52,17 @@ export default function ReviewSession({
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<RatedCard[]>([]);
   const [undo, setUndo] = useState<UndoState | null>(null);
+  const [clozeEnabled, setClozeEnabled] = useState(true);
+  const [clozeInput, setClozeInput] = useState("");
+  const [clozeResult, setClozeResult] = useState<ClozeResult | null>(null);
 
   const card = sessionCards[index];
   const done = index >= sessionCards.length;
+  // A cloze can be shown when the current card has an example containing the target.
+  const cloze = useMemo(
+    () => (card && clozeEnabled ? buildClozeFromCard(card) : null),
+    [card, clozeEnabled]
+  );
   const counts = {
     again: results.filter((r) => r.rating === "again").length,
     hard: results.filter((r) => r.rating === "hard").length,
@@ -123,6 +133,18 @@ export default function ReviewSession({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [done, flipped, rate, undoLast]);
+
+  // Moving to a new card clears any in-progress cloze attempt.
+  useEffect(() => {
+    setClozeInput("");
+    setClozeResult(null);
+  }, [index, sessionCards]);
+
+  function submitCloze() {
+    if (!cloze || !card) return;
+    setClozeResult(evaluateCloze(clozeInput, card));
+    setFlipped(true); // reveal the answer regardless of correctness
+  }
 
   function reviewWeakAgain() {
     const weak = results.filter((r) => r.rating === "again" || r.rating === "hard").map((r) => r.card);
@@ -199,6 +221,19 @@ export default function ReviewSession({
           </span>
         </span>
         <span className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setClozeEnabled((v) => !v)}
+            aria-pressed={clozeEnabled}
+            className={`rounded-full border px-3 py-0.5 text-xs font-medium transition-colors ${
+              clozeEnabled
+                ? "border-violet-glow/50 bg-violet-glow/15 text-violet-100"
+                : "border-white/15 bg-white/5 text-ink-muted hover:bg-white/10"
+            }`}
+            title="Type the missing word from the example before revealing the card"
+          >
+            ✎ Cloze {clozeEnabled ? "on" : "off"}
+          </button>
           {undo && results.length > 0 && (
             <button
               type="button"
@@ -223,59 +258,144 @@ export default function ReviewSession({
         />
       </div>
 
-      {/* The card */}
-      <div className="flip-scene">
-        <div className={`flip-inner ${flipped ? "flipped" : ""}`}>
+      {/* Cloze challenge (before revealing) or the flip card */}
+      {cloze && !flipped ? (
+        <GlassCard className="flex min-h-80 flex-col justify-center p-6 sm:p-8">
+          <p className="text-center text-xs uppercase tracking-[0.2em] text-ink-muted">
+            Fill in the missing {cloze.kind === "phrase" ? "phrase" : "word"}
+          </p>
+          <p className="mx-auto mt-4 max-w-xl text-center font-display text-xl italic leading-relaxed sm:text-2xl">
+            {cloze.sentence}
+          </p>
+          {card.translation && (
+            <p className="mt-3 text-center text-sm text-teal-200" dir="rtl" lang="ar">
+              {card.translation}
+            </p>
+          )}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (clozeInput.trim()) submitCloze();
+            }}
+            className="mx-auto mt-6 flex w-full max-w-md flex-col gap-3 sm:flex-row"
+          >
+            <Input
+              autoFocus
+              value={clozeInput}
+              onChange={(e) => setClozeInput(e.target.value)}
+              placeholder={cloze.kind === "phrase" ? "Type the full phrase…" : "Type the missing word…"}
+              aria-label="Your cloze answer"
+            />
+            <Button type="submit" disabled={!clozeInput.trim()} className="shrink-0 !px-8">
+              Check
+            </Button>
+          </form>
           <button
             type="button"
             onClick={() => setFlipped(true)}
-            className="flip-face glass relative flex min-h-80 w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-3xl p-8 text-center"
-            aria-label="Show answer"
+            className="mx-auto mt-4 text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
           >
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-0 flex select-none items-center justify-center font-display text-[14rem] font-bold italic text-white/[0.045]"
-            >
-              {card.text.charAt(0).toUpperCase()}
-            </span>
-            <span className="relative">
-              <span className="mb-3 block text-xs uppercase tracking-[0.2em] text-ink-muted">{card.kind}</span>
-              <span className="font-display text-4xl font-semibold italic sm:text-5xl">{card.text}</span>
-              {card.pronunciation && <span className="mt-3 block text-sm text-ink-muted">{card.pronunciation}</span>}
-              <span className="mt-8 block text-xs text-ink-muted/70">tap or press Space to reveal</span>
-            </span>
+            Skip — just show the answer
           </button>
+        </GlassCard>
+      ) : (
+        <div className="flip-scene">
+          <div className={`flip-inner ${flipped ? "flipped" : ""}`}>
+            <button
+              type="button"
+              onClick={() => setFlipped(true)}
+              className="flip-face glass relative flex min-h-80 w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-3xl p-8 text-center"
+              aria-label="Show answer"
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-0 flex select-none items-center justify-center font-display text-[14rem] font-bold italic text-white/[0.045]"
+              >
+                {card.text.charAt(0).toUpperCase()}
+              </span>
+              <span className="relative">
+                <span className="mb-3 block text-xs uppercase tracking-[0.2em] text-ink-muted">{card.kind}</span>
+                <span className="font-display text-4xl font-semibold italic sm:text-5xl">{card.text}</span>
+                {card.pronunciation && <span className="mt-3 block text-sm text-ink-muted">{card.pronunciation}</span>}
+                <span className="mt-8 block text-xs text-ink-muted/70">tap or press Space to reveal</span>
+              </span>
+            </button>
 
-          <div className="flip-back glass flex min-h-80 flex-col items-center justify-center rounded-3xl p-8 text-center">
-            <p className="text-lg font-medium sm:text-xl">{card.meaning}</p>
-            {card.translation && (
-              <p className="mt-2 text-lg text-teal-200" dir="rtl" lang="ar">{card.translation}</p>
-            )}
-            {card.example && (
-              <p className="mt-4 max-w-md text-sm italic text-ink-muted">“{card.example}”</p>
-            )}
-            {card.notes && <p className="mt-3 max-w-md text-xs text-ink-muted/80">{card.notes}</p>}
+            <div className="flip-back glass flex min-h-80 flex-col items-center justify-center rounded-3xl p-8 text-center">
+              <div className="flex items-center justify-center gap-2">
+                <p className="font-display text-2xl font-semibold italic">{card.text}</p>
+                <SpeakButton text={card.text} label={`Listen to ${card.text}`} />
+              </div>
+              <p className="mt-2 text-lg font-medium sm:text-xl">{card.meaning}</p>
+              {card.translation && (
+                <p className="mt-2 text-lg text-teal-200" dir="rtl" lang="ar">{card.translation}</p>
+              )}
+              {card.example && (
+                <p className="mt-4 flex max-w-md items-start justify-center gap-2 text-sm italic text-ink-muted">
+                  <span>“{card.example}”</span>
+                  <SpeakButton text={card.example} label="Listen to the example" className="mt-0.5 shrink-0" />
+                </p>
+              )}
+              {card.notes && <p className="mt-3 max-w-md text-xs text-ink-muted/80">{card.notes}</p>}
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {clozeResult && flipped && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            clozeResult.correct
+              ? "border-teal-glow/40 bg-teal-glow/10 text-teal-100"
+              : "border-rose-glow/40 bg-rose-glow/10 text-rose-100"
+          }`}
+          role="status"
+        >
+          {clozeResult.correct ? (
+            <p className="font-semibold">Correct — you filled in “{card.text}”.</p>
+          ) : (
+            <>
+              <p className="font-semibold">Not quite.</p>
+              <p className="mt-1">
+                You wrote “{clozeResult.normalizedAnswer || "(nothing)"}”. Answer:{" "}
+                <strong>{card.text}</strong>
+              </p>
+            </>
+          )}
+          <p className="mt-1 text-xs opacity-80">
+            {clozeResult.correct
+              ? "Suggested rating: Good (or better)."
+              : "Suggested rating: Again — this counts as a miss."}
+          </p>
+        </div>
+      )}
 
       {error && <ErrorBanner message={error} />}
 
       {/* Rating buttons */}
       {flipped ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {RATINGS.map((r) => (
-            <Button
-              key={r.rating}
-              variant="ghost"
-              disabled={busy}
-              onClick={() => rate(r.rating)}
-              className={`flex-col !gap-0 !py-3 ${r.classes}`}
-            >
-              <span>{r.label} <kbd className="ml-1 rounded bg-white/10 px-1 text-[10px] font-normal">{r.key}</kbd></span>
-              <span className="text-[11px] font-normal opacity-70">{r.detail}</span>
-            </Button>
-          ))}
+          {RATINGS.map((r) => {
+            const suggested = clozeResult
+              ? clozeResult.correct
+                ? r.rating === "good"
+                : r.rating === "again"
+              : false;
+            return (
+              <Button
+                key={r.rating}
+                variant="ghost"
+                disabled={busy}
+                onClick={() => rate(r.rating)}
+                className={`flex-col !gap-0 !py-3 ${r.classes} ${
+                  suggested ? "!bg-white/10 ring-2 ring-violet-glow/60" : ""
+                }`}
+              >
+                <span>{r.label} <kbd className="ml-1 rounded bg-white/10 px-1 text-[10px] font-normal">{r.key}</kbd></span>
+                <span className="text-[11px] font-normal opacity-70">{r.detail}</span>
+              </Button>
+            );
+          })}
         </div>
       ) : (
         <Button variant="ghost" className="w-full !py-3" onClick={() => setFlipped(true)}>

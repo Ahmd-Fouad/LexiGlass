@@ -18,6 +18,13 @@ function DailyPlan({ items }: { items: PlanItem[] }) {
   const done = isPlanDone(items);
   const minutesLeft = planMinutesLeft(items);
 
+  // When the plan has cards to work on, offer to turn them into active
+  // writing/pronunciation practice (uses the same weak/mistakes/due target set).
+  const practiceItem = items.find(
+    (i) => ["weak", "mistakes", "due"].includes(i.id) && i.status !== "completed" && i.count > 0
+  );
+  const practiceMode = practiceItem?.id === "weak" ? "weak" : practiceItem?.id === "mistakes" ? "mistakes" : "due";
+
   return (
     <GlassCard className="p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -84,6 +91,18 @@ function DailyPlan({ items }: { items: PlanItem[] }) {
             );
           })}
         </ul>
+      )}
+
+      {!done && practiceItem && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-white/10 pt-4 text-sm text-ink-muted">
+          <span>Turn these into active practice:</span>
+          <LinkButton href={`/writing?mode=${practiceMode}`} variant="ghost" className="!px-3 !py-1 !text-xs">
+            ✍ Writing
+          </LinkButton>
+          <LinkButton href={`/pronunciation?mode=${practiceMode}`} variant="ghost" className="!px-3 !py-1 !text-xs">
+            🔊 Pronunciation
+          </LinkButton>
+        </div>
       )}
     </GlassCard>
   );
@@ -180,6 +199,9 @@ export default async function DashboardPage() {
         <GlassCard className="p-6 lg:col-span-2">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">Quick actions</h2>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <LinkButton href="/writing" variant="ghost">✍ Writing practice</LinkButton>
+            <LinkButton href="/pronunciation" variant="ghost">🔊 Pronunciation</LinkButton>
+            <LinkButton href="/collections" variant="ghost">▦ Study collections</LinkButton>
             <LinkButton href="/cards/new" variant="ghost">+ Add word</LinkButton>
             <LinkButton href="/cards/new?kind=phrase" variant="ghost">+ Add phrase</LinkButton>
             <LinkButton href="/grammar/new" variant="ghost">+ Grammar topic</LinkButton>
