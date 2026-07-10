@@ -16,6 +16,7 @@ import {
 } from "./analytics";
 import { isWeakCard, type RecentMistakeCounts } from "./review";
 import { buildDailyPlanItems, type DailyPlanSnapshot, type PlanItem } from "./study-plan";
+import { buildWritingStats, type WritingStats } from "./writing-analytics";
 import {
   activeRecordTopicIds,
   excludeTopicsCoveredByRecords,
@@ -217,26 +218,45 @@ async function getWeakestGrammarTopic(
   return topic;
 }
 
+/** All-time writing-practice stats for the Progress page, scoped to the user. */
+export async function getWritingStats(userId: string): Promise<WritingStats> {
+  const rows = await db.writingAttempt.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: 200, // plenty for averages/trend without unbounded reads
+    select: { mode: true, score: true, createdAt: true, feedback: true, promptWords: true },
+  });
+  return buildWritingStats(rows);
+}
+
 /** Assembles today's snapshot and builds the Smart Daily Study Plan. */
 export async function buildDailyStudyPlan(userId: string): Promise<PlanItem[]> {
   const todayStart = startOfToday();
   const now = new Date();
 
-  const [cards, grammarTopicCount, recentMistakes, logsToday, sessionsToday, weakestGrammarTopic] =
-    await Promise.all([
-      db.flashcard.findMany({ where: { userId } }),
-      db.grammarTopic.count({ where: { userId } }),
-      getRecentMistakeCounts(userId),
-      db.reviewLog.findMany({
-        where: { userId, reviewedAt: { gte: todayStart } },
-        select: { flashcardId: true },
-      }),
-      db.quizSession.findMany({
-        where: { userId, startedAt: { gte: todayStart } },
-        select: { type: true, finishedAt: true },
-      }),
-      getWeakestGrammarTopic(userId),
-    ]);
+  const [
+    cards,
+    grammarTopicCount,
+    recentMistakes,
+    logsToday,
+    sessionsToday,
+    weakestGrammarTopic,
+    writingAttemptsToday,
+  ] = await Promise.all([
+    db.flashcard.findMany({ where: { userId } }),
+    db.grammarTopic.count({ where: { userId } }),
+    getRecentMistakeCounts(userId),
+    db.reviewLog.findMany({
+      where: { userId, reviewedAt: { gte: todayStart } },
+      select: { flashcardId: true },
+    }),
+    db.quizSession.findMany({
+      where: { userId, startedAt: { gte: todayStart } },
+      select: { type: true, finishedAt: true },
+    }),
+    getWeakestGrammarTopic(userId),
+    db.writingAttempt.count({ where: { userId, createdAt: { gte: todayStart } } }),
+  ]);
 
   const reviewedTodayIds = new Set(logsToday.map((l) => l.flashcardId));
   const weakCards = cards.filter(isWeakCard);
@@ -260,6 +280,7 @@ export async function buildDailyStudyPlan(userId: string): Promise<PlanItem[]> {
       (s) => s.type === "grammar" && s.finishedAt != null
     ),
     weakestGrammarTopic,
+    writingAttemptsToday,
   };
 
   return buildDailyPlanItems(snapshot);

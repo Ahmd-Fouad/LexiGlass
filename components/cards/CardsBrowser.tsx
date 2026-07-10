@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { api, dueLabel, formatDate } from "@/lib/client";
 import { Button, Chip, difficultyTone, EmptyState, ErrorBanner, GlassCard, Input, LinkButton, Select } from "@/components/ui";
+import SpeakButton from "@/components/pronunciation/SpeakButton";
 import { cardTags, type CardDTO } from "./card-dto";
 
 type StatusFilter = "all" | "due" | "recent" | "weak";
@@ -151,7 +152,14 @@ export default function CardsBrowser({
                 <GlassCard hover className="flex h-full flex-col p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-display text-2xl font-medium">{card.text}</p>
+                      <p className="flex items-center gap-2 font-display text-2xl font-medium">
+                        <span className="min-w-0">{card.text}</span>
+                        <SpeakButton
+                          text={card.text}
+                          label={`Listen to ${card.text}`}
+                          className="!size-6 shrink-0 !text-xs"
+                        />
+                      </p>
                       <p className="mt-1 text-sm text-ink-muted">{card.meaning}</p>
                       {card.translation && (
                         <p className="mt-0.5 text-sm text-teal-200" dir="rtl" lang="ar">{card.translation}</p>
@@ -161,8 +169,13 @@ export default function CardsBrowser({
                   </div>
 
                   {card.example && (
-                    <p className="mt-3 border-l-2 border-violet-glow/40 pl-3 text-sm italic text-ink-muted">
-                      {card.example}
+                    <p className="mt-3 flex items-start gap-2 border-l-2 border-violet-glow/40 pl-3 text-sm italic text-ink-muted">
+                      <span className="min-w-0 flex-1">{card.example}</span>
+                      <SpeakButton
+                        text={card.example}
+                        label="Listen to the example sentence"
+                        className="!size-6 shrink-0 !text-xs"
+                      />
                     </p>
                   )}
 

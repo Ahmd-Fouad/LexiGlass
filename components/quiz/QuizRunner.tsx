@@ -5,7 +5,14 @@ import { api } from "@/lib/client";
 import { answersMatch } from "@/lib/quiz";
 import { checkClozeAnswer } from "@/lib/cloze";
 import { Button, Chip, ErrorBanner, GlassCard, Input, LinkButton, Select, Spinner } from "@/components/ui";
+import SpeakButton from "@/components/pronunciation/SpeakButton";
 import type { QuizQuestion, StartQuizResponse, VocabQuizMode } from "@/lib/types";
+
+/** Pulls the plain sentence out of an "Example: …" explanation, if present. */
+function exampleFromExplanation(explanation?: string): string | null {
+  const match = explanation?.match(/^Example:\s*(.+)$/s);
+  return match ? match[1].trim() : null;
+}
 
 type Phase = "intro" | "loading" | "question" | "feedback" | "results";
 
@@ -300,14 +307,30 @@ export default function QuizRunner({
                   <Chip tone={a.isCorrect ? "teal" : "rose"}>{a.isCorrect ? "Correct" : "Wrong"}</Chip>
                 </div>
                 {a.question.context && <p className="mt-1 text-ink-muted italic">{a.question.context}</p>}
-                <p className="mt-2 text-ink-muted">
-                  Your answer: <span className={a.isCorrect ? "text-teal-200" : "text-rose-200"}>{a.userAnswer}</span>
-                  {!a.isCorrect && (
-                    <> · Correct: <span className="text-teal-200">{a.question.answer}</span></>
-                  )}
+                <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-ink-muted">
+                  <span>
+                    Your answer: <span className={a.isCorrect ? "text-teal-200" : "text-rose-200"}>{a.userAnswer}</span>
+                    {!a.isCorrect && (
+                      <> · Correct: <span className="text-teal-200">{a.question.answer}</span></>
+                    )}
+                  </span>
+                  <SpeakButton
+                    text={a.question.answer}
+                    label={`Listen to the correct answer: ${a.question.answer}`}
+                    className="!size-6 shrink-0 !text-xs"
+                  />
                 </p>
                 {!a.isCorrect && a.question.explanation && (
-                  <p className="mt-1 text-xs text-ink-muted/80">{a.question.explanation}</p>
+                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted/80">
+                    <span>{a.question.explanation}</span>
+                    {exampleFromExplanation(a.question.explanation) && (
+                      <SpeakButton
+                        text={exampleFromExplanation(a.question.explanation)!}
+                        label="Listen to the example sentence"
+                        className="!size-5 shrink-0 !text-[10px]"
+                      />
+                    )}
+                  </p>
                 )}
                 {!a.isCorrect && a.question.flashcardId && (
                   <p className="mt-2">

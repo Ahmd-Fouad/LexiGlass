@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
 import { Button, ErrorBanner, Field, GlassCard, Input, Select, TextArea } from "@/components/ui";
+import SpeakButton from "@/components/pronunciation/SpeakButton";
 import type { CardDTO } from "./card-dto";
 import { DefinitionPanel, ExamplePanel, useSuggestions } from "./SmartSuggest";
 import type { DefinitionLookupResult, ExampleLookupResult } from "@/lib/dictionary";
@@ -94,15 +95,23 @@ export default function CardForm({ card, initialKind }: { card?: CardDTO; initia
         <div className="grid gap-4 sm:grid-cols-4">
           <div className="sm:col-span-2">
             <Field label="Word or phrase" required>
-              <Input
-                ref={textRef}
-                value={form.text}
-                onChange={set("text")}
-                placeholder="e.g. meticulous / break the ice"
-                required
-                maxLength={200}
-                autoFocus={!editing}
-              />
+              <span className="flex items-center gap-2">
+                <Input
+                  ref={textRef}
+                  value={form.text}
+                  onChange={set("text")}
+                  placeholder="e.g. meticulous / break the ice"
+                  required
+                  maxLength={200}
+                  autoFocus={!editing}
+                />
+                {/* Renders nothing while empty or without browser TTS. */}
+                <SpeakButton
+                  text={form.text}
+                  label="Listen to this word or phrase"
+                  className="shrink-0"
+                />
+              </span>
             </Field>
           </div>
           <Field label="Type" required>
@@ -171,14 +180,21 @@ export default function CardForm({ card, initialKind }: { card?: CardDTO; initia
               rows={2}
             />
           </Field>
-          <button
-            type="button"
-            onClick={() => form.text.trim() && examples.load(form.text)}
-            disabled={!form.text.trim()}
-            className="absolute right-0 top-0 rounded-lg px-2 py-0.5 text-xs font-semibold text-violet-200 hover:bg-white/10 disabled:pointer-events-none disabled:opacity-40"
-          >
-            ✨ Suggest example
-          </button>
+          <span className="absolute right-0 top-0 flex items-center gap-1.5">
+            <SpeakButton
+              text={form.example}
+              label="Listen to the example sentence"
+              className="!size-6 !text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => form.text.trim() && examples.load(form.text)}
+              disabled={!form.text.trim()}
+              className="rounded-lg px-2 py-0.5 text-xs font-semibold text-violet-200 hover:bg-white/10 disabled:pointer-events-none disabled:opacity-40"
+            >
+              ✨ Suggest example
+            </button>
+          </span>
           <ExamplePanel
             state={examples.state}
             onDismiss={examples.dismiss}

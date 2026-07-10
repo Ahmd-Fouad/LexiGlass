@@ -38,6 +38,8 @@ export interface DailyPlanSnapshot {
   startedGrammarQuizToday: boolean;
   finishedGrammarQuizToday: boolean;
   weakestGrammarTopic: { id: string; title: string } | null;
+  /** WritingAttempt rows saved today (0 when the user hasn't written yet). */
+  writingAttemptsToday: number;
 }
 
 const MIN_CARDS_FOR_QUIZ = 4; // mirrors lib/quiz.ts
@@ -123,7 +125,54 @@ export function buildDailyPlanItems(s: DailyPlanSnapshot): PlanItem[] {
     });
   }
 
-  // 4. Vocabulary quiz — active recall beats re-reading.
+  // 4. Writing practice — use the day's problem words in real sentences.
+  //    Target pool precedence: recent mistakes (high) → weak words (medium)
+  //    → due cards (low). Hidden entirely when there is nothing to write
+  //    with and nothing was written today.
+  const writingTarget =
+    s.recentMistakeCardCount > 0
+      ? {
+          mode: "mistakes",
+          available: s.recentMistakeCardCount,
+          priority: "high" as PlanPriority,
+          title: "Practice writing with your mistakes",
+          reason: "Use the words you keep missing in real sentences to make them stick.",
+        }
+      : s.weakCount > 0
+        ? {
+            mode: "weak",
+            available: s.weakCount,
+            priority: "medium" as PlanPriority,
+            title: "Practice writing with weak words",
+            reason: "Use your weak vocabulary in real sentences to make it stick.",
+          }
+        : s.dueCount > 0
+          ? {
+              mode: "due",
+              available: s.dueCount,
+              priority: "low" as PlanPriority,
+              title: "Practice writing with due words",
+              reason: "Writing with today's due words beats re-reading them.",
+            }
+          : null;
+  const wroteToday = s.writingAttemptsToday > 0;
+  if (writingTarget || wroteToday) {
+    items.push({
+      id: "writing",
+      title: wroteToday ? "Writing practice done" : writingTarget!.title,
+      reason: wroteToday
+        ? "You saved a writing attempt today — great active recall."
+        : writingTarget!.reason,
+      minutes: wroteToday ? 0 : 5,
+      count: wroteToday ? 0 : Math.min(writingTarget!.available, 10),
+      priority: writingTarget?.priority ?? "low",
+      status: wroteToday ? "completed" : "not_started",
+      href: writingTarget ? `/writing?mode=${writingTarget.mode}` : "/writing",
+      cta: "Start writing practice",
+    });
+  }
+
+  // 5. Vocabulary quiz — active recall beats re-reading.
   if (s.totalCards >= MIN_CARDS_FOR_QUIZ) {
     items.push({
       id: "vocab-quiz",
@@ -142,7 +191,7 @@ export function buildDailyPlanItems(s: DailyPlanSnapshot): PlanItem[] {
     });
   }
 
-  // 5. Grammar quiz — aimed at the weakest topic when one stands out.
+  // 6. Grammar quiz — aimed at the weakest topic when one stands out.
   items.push({
     id: "grammar-quiz",
     title: s.weakestGrammarTopic

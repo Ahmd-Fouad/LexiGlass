@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/auth";
 import { getProgressStats } from "@/lib/stats";
-import { getWeaknessData } from "@/lib/learning-data";
+import { getWeaknessData, getWritingStats } from "@/lib/learning-data";
+import type { WritingStats } from "@/lib/writing-analytics";
 import {
   accuracyByDifficulty,
   accuracyByQuestionType,
@@ -48,7 +49,11 @@ function AccuracyBar({ bucket }: { bucket: AccuracyBucket }) {
 export default async function StatsPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
-  const [stats, weakness] = await Promise.all([getProgressStats(userId), getWeaknessData(userId)]);
+  const [stats, weakness, writing] = await Promise.all([
+    getProgressStats(userId),
+    getWeaknessData(userId),
+    getWritingStats(userId),
+  ]);
 
   const states = classifyCards(weakness.cards);
   const due = dueBuckets(weakness.cards);
@@ -75,7 +80,7 @@ export default async function StatsPage() {
         </p>
       </div>
 
-      {stats.totalReviews === 0 && stats.quizzes.length === 0 ? (
+      {stats.totalReviews === 0 && stats.quizzes.length === 0 && writing.totalAttempts === 0 ? (
         <EmptyState
           title="No progress to show yet"
           hint="Review a few cards or take a quiz, and your history will appear here."
@@ -322,8 +327,8 @@ export default async function StatsPage() {
             </SectionCard>
           </section>
 
-          {/* Quiz history */}
-          <section>
+          {/* Quiz history + writing practice */}
+          <section className="grid gap-4 lg:grid-cols-2">
             <SectionCard title="Quiz history">
               {stats.quizzes.length === 0 ? (
                 <p className="text-sm text-ink-muted">
@@ -350,9 +355,102 @@ export default async function StatsPage() {
                 </ul>
               )}
             </SectionCard>
+
+            <SectionCard title="Writing practice">
+              <WritingPracticeStats writing={writing} />
+            </SectionCard>
           </section>
         </>
       )}
     </main>
+  );
+}
+
+function WritingPracticeStats({ writing }: { writing: WritingStats }) {
+  if (writing.totalAttempts === 0) {
+    return (
+      <div>
+        <p className="text-sm text-ink-muted">
+          No writing practice yet. Start a writing session to track your progress.
+        </p>
+        <div className="mt-4">
+          <LinkButton href="/writing" variant="ghost" className="!px-3.5 !py-1.5 !text-xs">
+            Start writing practice
+          </LinkButton>
+        </div>
+      </div>
+    );
+  }
+
+  const trendChip =
+    writing.trend === "improving"
+      ? { tone: "teal" as const, label: "↑ Improving" }
+      : writing.trend === "declining"
+        ? { tone: "rose" as const, label: "↓ Declining" }
+        : writing.trend === "steady"
+          ? { tone: "neutral" as const, label: "→ Steady" }
+          : null;
+
+  return (
+    <div className="space-y-4">
+      {/* Overview tiles */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: "Attempts", value: writing.totalAttempts },
+          { label: "Average score", value: writing.averageScore },
+          { label: "Best score", value: writing.bestScore },
+          { label: "This week", value: writing.last7Days },
+        ].map((t) => (
+          <div key={t.label} className="rounded-xl bg-white/5 px-3 py-3 text-center">
+            <p className="text-2xl font-semibold tabular-nums">{t.value}</p>
+            <p className="mt-0.5 text-xs text-ink-muted">{t.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {trendChip && (
+        <p className="flex items-center gap-2 text-xs text-ink-muted">
+          <Chip tone={trendChip.tone}>{trendChip.label}</Chip>
+          Score trend across your attempts · {writing.last30Days} in the last 30 days
+        </p>
+      )}
+
+      {/* Recent attempts */}
+      <ul className="divide-y divide-white/8">
+        {writing.recent.map((a, i) => (
+          <li key={i} className="flex items-center justify-between gap-3 py-2.5">
+            <div className="min-w-0">
+              <p className="font-medium capitalize">{a.mode} writing</p>
+              <p className="text-xs text-ink-muted">
+                {a.usedCount}/{a.targetCount} targets used · {a.wordCount} words · {formatDate(a.createdAt)}
+              </p>
+            </div>
+            <Chip tone={a.score >= 75 ? "teal" : a.score >= 50 ? "amber" : "rose"}>{a.score}</Chip>
+          </li>
+        ))}
+      </ul>
+
+      {/* Targets that keep going missing */}
+      {writing.mostMissedTargets.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+            Often missed in writing
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {writing.mostMissedTargets.map((m) => (
+              <Chip key={m.text} tone="amber">
+                {m.text} ×{m.count}
+              </Chip>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <LinkButton href="/writing" variant="ghost" className="!px-3.5 !py-1.5 !text-xs">
+          Practice again
+        </LinkButton>
+      </div>
+    </div>
   );
 }

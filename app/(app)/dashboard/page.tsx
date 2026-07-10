@@ -128,6 +128,43 @@ export default async function DashboardPage() {
     { label: "Mastered", value: stats.masteredCount, href: "/stats" },
   ];
 
+  // Active-practice cards, enriched from today's plan when possible.
+  const writingItem = plan.find((i) => i.id === "writing");
+  const writingDone = writingItem?.status === "completed";
+  const practiceCards = [
+    {
+      icon: "✍",
+      title: "Writing practice",
+      description: "Use weak words in your own sentences.",
+      hint: writingDone
+        ? "Done for today ✓"
+        : writingItem && writingItem.count > 0
+          ? `${writingItem.count} target ${writingItem.count === 1 ? "word" : "words"} ready`
+          : null,
+      done: writingDone,
+      href: writingItem && !writingDone ? writingItem.href : "/writing",
+      cta: "Start writing",
+    },
+    {
+      icon: "🔊",
+      title: "Pronunciation",
+      description: "Listen, repeat, and compare your speech.",
+      hint: null,
+      done: false,
+      href: "/pronunciation",
+      cta: "Practice pronunciation",
+    },
+    {
+      icon: "▦",
+      title: "Study collections",
+      description: "Study by tag, difficulty, weakness, or due status.",
+      hint: null,
+      done: false,
+      href: "/collections",
+      cta: "Open collections",
+    },
+  ];
+
   return (
     <main className="rise-in space-y-6">
       {/* Hero: today's review ritual */}
@@ -183,6 +220,27 @@ export default async function DashboardPage() {
         ))}
       </section>
 
+      {/* Active practice */}
+      <section className="grid gap-4 sm:grid-cols-3" aria-label="Active practice">
+        {practiceCards.map((p) => (
+          <GlassCard key={p.title} hover className="flex h-full flex-col p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">
+              <span aria-hidden className="mr-1.5">{p.icon}</span>
+              {p.title}
+            </h2>
+            <p className="mt-2 text-sm text-ink-muted">{p.description}</p>
+            {p.hint && (
+              <p className={`mt-1 text-xs ${p.done ? "text-teal-200" : "text-violet-200"}`}>{p.hint}</p>
+            )}
+            <div className="mt-auto pt-4">
+              <LinkButton href={p.href} variant="ghost" className="!px-4 !py-2 !text-xs">
+                {p.cta}
+              </LinkButton>
+            </div>
+          </GlassCard>
+        ))}
+      </section>
+
       {/* Streak + quick actions */}
       <section className="grid gap-4 lg:grid-cols-3">
         <GlassCard className="p-6">
@@ -199,9 +257,6 @@ export default async function DashboardPage() {
         <GlassCard className="p-6 lg:col-span-2">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">Quick actions</h2>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <LinkButton href="/writing" variant="ghost">✍ Writing practice</LinkButton>
-            <LinkButton href="/pronunciation" variant="ghost">🔊 Pronunciation</LinkButton>
-            <LinkButton href="/collections" variant="ghost">▦ Study collections</LinkButton>
             <LinkButton href="/cards/new" variant="ghost">+ Add word</LinkButton>
             <LinkButton href="/cards/new?kind=phrase" variant="ghost">+ Add phrase</LinkButton>
             <LinkButton href="/grammar/new" variant="ghost">+ Grammar topic</LinkButton>

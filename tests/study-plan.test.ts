@@ -25,6 +25,7 @@ function makeSnapshot(overrides: Partial<DailyPlanSnapshot> = {}): DailyPlanSnap
     startedGrammarQuizToday: false,
     finishedGrammarQuizToday: false,
     weakestGrammarTopic: null,
+    writingAttemptsToday: 0,
     ...overrides,
   };
 }
@@ -107,6 +108,54 @@ describe("buildDailyPlanItems", () => {
     assert.equal(find(finished, "vocab-quiz")?.status, "completed");
   });
 
+  it("shows a medium-priority writing item when weak words exist", () => {
+    const items = buildDailyPlanItems(makeSnapshot({ weakCount: 6 }));
+    const w = find(items, "writing");
+    assert.ok(w);
+    assert.equal(w.title, "Practice writing with weak words");
+    assert.equal(w.priority, "medium");
+    assert.equal(w.status, "not_started");
+    assert.equal(w.href, "/writing?mode=weak");
+    assert.equal(w.cta, "Start writing practice");
+  });
+
+  it("shows a high-priority writing item when recent mistakes exist", () => {
+    const items = buildDailyPlanItems(
+      makeSnapshot({ weakCount: 6, recentMistakeCardCount: 3, mistakeCardsReviewedToday: 3 })
+    );
+    const w = find(items, "writing");
+    assert.ok(w);
+    assert.equal(w.title, "Practice writing with your mistakes");
+    assert.equal(w.priority, "high");
+    assert.equal(w.href, "/writing?mode=mistakes");
+  });
+
+  it("points the writing item at due words when nothing is weak or missed", () => {
+    const items = buildDailyPlanItems(makeSnapshot({ dueCount: 4 }));
+    const w = find(items, "writing");
+    assert.ok(w);
+    assert.equal(w.priority, "low");
+    assert.equal(w.href, "/writing?mode=due");
+  });
+
+  it("completes the writing item once an attempt was saved today", () => {
+    const items = buildDailyPlanItems(makeSnapshot({ weakCount: 6, writingAttemptsToday: 1 }));
+    const w = find(items, "writing");
+    assert.ok(w);
+    assert.equal(w.status, "completed");
+    assert.equal(w.minutes, 0);
+  });
+
+  it("hides the writing item when there are no targets and no attempt today", () => {
+    const items = buildDailyPlanItems(makeSnapshot());
+    assert.equal(find(items, "writing"), undefined);
+  });
+
+  it("still shows a completed writing item when the user wrote today without targets", () => {
+    const items = buildDailyPlanItems(makeSnapshot({ writingAttemptsToday: 2 }));
+    assert.equal(find(items, "writing")?.status, "completed");
+  });
+
   it("aims the grammar quiz at the weakest topic when one exists", () => {
     const items = buildDailyPlanItems(
       makeSnapshot({ weakestGrammarTopic: { id: "t1", title: "Past simple" } })
@@ -153,6 +202,7 @@ describe("plan helpers", () => {
         finishedVocabQuizToday: true,
         startedGrammarQuizToday: true,
         finishedGrammarQuizToday: true,
+        writingAttemptsToday: 1,
       })
     );
     assert.equal(isPlanDone(done), true);
