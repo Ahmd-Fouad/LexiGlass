@@ -16,6 +16,11 @@ async function isAuthenticated(req: NextRequest): Promise<boolean> {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // The offline fallback page must be reachable (and precacheable by the
+  // service worker) without a session; it renders no user data itself.
+  if (pathname === "/offline") return NextResponse.next();
+
   const authed = await isAuthenticated(req);
 
   if (PUBLIC_PATHS.includes(pathname)) {
@@ -36,6 +41,10 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Protect all pages; API routes handle auth themselves (401 instead of redirect).
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  // Protect all pages; API routes handle auth themselves (401 instead of
+  // redirect). PWA files (service worker, manifest, icons) must load without
+  // a session or installation breaks.
+  matcher: [
+    "/((?!api|_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|icons).*)",
+  ],
 };
