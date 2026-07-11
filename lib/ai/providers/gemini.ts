@@ -25,14 +25,15 @@ export class GeminiProvider implements AIQuizProvider {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return [];
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`;
+    // Key travels in a header, not the URL, so it can't end up in URL logs.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
     const prompt = buildGrammarQuestionPrompt(topic, options.count);
 
     const res = await fetchWithTimeout(
       url,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
           contents: [{ role: "user", parts: [{ text: prompt }] }],

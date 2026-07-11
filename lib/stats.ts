@@ -89,11 +89,7 @@ export async function getProgressStats(userId: string) {
   const now = new Date();
   const twoWeeksAgo = new Date(startOfDay(now).getTime() - 13 * DAY_MS);
 
-  const [logs, allLogs, cards, quizzes] = await Promise.all([
-    db.reviewLog.findMany({
-      where: { userId, reviewedAt: { gte: twoWeeksAgo } },
-      select: { reviewedAt: true, wasCorrect: true },
-    }),
+  const [allLogs, cards, quizzes] = await Promise.all([
     db.reviewLog.findMany({
       where: { userId },
       select: { reviewedAt: true, wasCorrect: true },
@@ -106,6 +102,9 @@ export async function getProgressStats(userId: string) {
       take: 15,
     }),
   ]);
+
+  // The 14-day window is a subset of allLogs — no second query needed.
+  const logs = allLogs.filter((l) => l.reviewedAt >= twoWeeksAgo);
 
   // Reviews per day for the last 14 days.
   const daily: DailyCount[] = [];

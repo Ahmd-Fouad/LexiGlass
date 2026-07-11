@@ -11,7 +11,10 @@ A full-stack flashcard and grammar study app with a spaced-repetition system, bu
 - **Review mode** — flip-card review of due cards with the four rating buttons.
 - **Vocabulary quiz** — ~20 questions per quiz, chosen by priority: due today → previously-wrong → difficult → longest-unreviewed (older cards fill the rest). Mixed question types: meaning MCQ, reverse MCQ, fill-in-the-blank from the example sentence, true/false. Scores and every answer are saved; wrong answers can be retried as practice.
 - **Grammar topics** — title, explanation, examples, common mistakes (`wrong => right` format), notes, tags, difficulty. Add / edit / delete / search.
-- **Grammar quiz** — questions generated **from your own topics** (examples become "choose the correct sentence", mistakes become "correct the sentence" / "find the mistake") plus a built-in local bank of ~40 questions that leans toward topics you've studied. No external API, no API keys.
+- **Grammar quiz** — questions generated **from your own topics** (examples become "choose the correct sentence", mistakes become "correct the sentence" / "find the mistake") plus a built-in local bank of ~40 questions that leans toward topics you've studied. Works fully offline-from-keys; see [Adaptive grammar question pool](#adaptive-grammar-question-pool) for the optional AI-provider top-up.
+- **Adaptive grammar question pool** — each topic keeps a pool of generated questions in the database. Correct answers retire a question as "mastered" (never deleted); wrong answers send it to the Mistake Bank and the pool tops itself up in the background. Generation runs through free-tier AI providers (Gemini, Groq, OpenRouter, Cloudflare, Hugging Face) **only if you add a key** — with zero keys, a built-in local generator keeps the pool filled. Keys stay server-side, never in the client or the database.
+- **Mistake Bank** (`/mistakes`) — every word, phrase and grammar question you keep getting wrong, worst first, with per-question practice ("practice this mistake" → practiced → resolved, never hard-deleted).
+- **Smart Daily Study Plan** — a dashboard checklist built from today's due cards, weak words, recent mistakes, quizzes and writing practice, with time estimates, that checks itself off as you study.
 - **Cloze practice** — active recall by typing the target word/phrase back into its own example sentence. Used in the vocabulary quiz (fill-in-the-blank questions) and as an optional challenge in review mode. Phrases require the full phrase; single words tolerate one small typo. Shared logic in [lib/cloze.ts](lib/cloze.ts).
 - **Writing practice** (`/writing`) — pick 3–10 target words/phrases (weak / due / recent mistakes / random / by tag / difficult phrases) and write real sentences with them. Your writing is checked **locally with rules** (target usage, complete phrases, word/sentence counts, punctuation, capitalization, repeated words, possible spelling slips) and scored 0–100. Attempts are saved and feed the Progress page (attempts, average/best score, score trend, most-missed targets) and the Smart Daily Study Plan, which adds a writing task for your weak words / recent mistakes / due cards and marks it done once you save an attempt that day. No AI.
 - **Study collections** (`/collections`) — ready-made study sets built from your cards: Due today, Weak words, Recent mistakes, Difficult phrases, Mastered, plus auto-generated sets by tag, category and difficulty. Each collection links straight to review, quiz, writing practice, or the filtered card list.
@@ -23,7 +26,8 @@ A full-stack flashcard and grammar study app with a spaced-repetition system, bu
 
 ```bash
 npm install                 # also runs `prisma generate`
-npx prisma migrate dev      # creates prisma/dev.db (SQLite) and applies migrations
+cp .env.example .env        # then fill in DATABASE_URL + AUTH_SECRET (see below)
+npx prisma migrate dev      # applies migrations to your database
 npm run db:seed             # optional: demo account with sample data
 npm run dev                 # http://localhost:3000
 ```
@@ -34,10 +38,10 @@ Demo account (after seeding): **demo@lexiglass.app / demo1234**
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | `file:./dev.db` for SQLite, or a `postgresql://…` URL |
+| `DATABASE_URL` | A `postgresql://…` connection string (the schema's provider is PostgreSQL — Supabase, Neon and Vercel Postgres all work). For zero-setup local SQLite instead, see [Using SQLite locally](#using-sqlite-locally). |
 | `AUTH_SECRET` | Long random string that signs session cookies. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 
-A working `.env` is included for local development — **change `AUTH_SECRET` before deploying** and never commit real secrets.
+Copy `.env.example` to `.env` and fill in both values — **use a fresh `AUTH_SECRET` for every deployment** and never commit real secrets.
 
 **Secret handling**: `.env.example` is a template with no real values — it's committed and safe to share. `.env` (and `.env.local` / `.env.*.local`) hold your actual secrets and are gitignored; never commit them. All AI provider API keys are read with `process.env` on the server only (see `lib/ai/providers/`) — they are never sent to the client, never stored in the database, and never logged.
 
@@ -48,27 +52,33 @@ Schema lives in [prisma/schema.prisma](prisma/schema.prisma) with migrations und
 - **User** — account + password hash
 - **Flashcard** — content fields + SRS state (easeFactor, intervalDays, dueDate, counts, lapses)
 - **GrammarTopic** — explanation, examples, common mistakes, tags
+- **GeneratedGrammarQuestion** — the per-topic adaptive question pool (provider, status active/mastered/…, quality score, show/answer counters)
+- **GrammarMistake** — one wrongly-answered grammar question for the Mistake Bank (active → practiced → resolved, never hard-deleted)
+- **AIGenerationLog** — one row per generation attempt (provider, counts, no secrets)
 - **QuizSession** / **QuizAnswer** — every quiz and every answered question
 - **ReviewLog** — one row per SRS review (feeds charts, accuracy, and streak)
-- **WritingAttempt** — one saved Writing Practice attempt (mode, target words, text, rule-based feedback JSON, 0–100 score). Added by migration `add_writing_attempt`.
+- **DictionaryCache** — cached external dictionary lookups (definitions and examples separately, versioned)
+- **WritingAttempt** — one saved Writing Practice attempt (mode, target words, text, rule-based feedback JSON, 0–100 score)
 
-### Switching to Supabase / PostgreSQL
+### Using SQLite locally
 
-1. In `prisma/schema.prisma` change `provider = "sqlite"` → `provider = "postgresql"`.
-2. Set `DATABASE_URL` to your Postgres connection string (Supabase: *Project Settings → Database → Connection string*, use the pooled URL).
-3. Run `npx prisma migrate dev --name init-postgres` (fresh DB) and `npm run db:seed`.
+The schema ships with `provider = "postgresql"` (what the deployed app uses). For a zero-setup local database:
 
-No application code changes are needed — everything goes through Prisma.
+1. In `prisma/schema.prisma` change `provider = "postgresql"` → `provider = "sqlite"`.
+2. Set `DATABASE_URL="file:./dev.db"` in `.env`.
+3. Delete `prisma/migrations/` (they were generated for Postgres) and run `npx prisma migrate dev --name init-sqlite`, then `npm run db:seed`.
+
+No application code changes are needed — everything goes through Prisma. Just don't commit the provider switch or the regenerated migrations if the deployment still targets Postgres.
 
 ## Deploying
 
 **Vercel** (recommended):
 1. Push the repo to GitHub and import it in Vercel.
-2. Use a hosted Postgres database (Supabase, Neon, or Vercel Postgres) — SQLite files don't persist on serverless hosts. Follow the Postgres switch above.
+2. Use a hosted Postgres database (Supabase, Neon, or Vercel Postgres) — SQLite files don't persist on serverless hosts. The schema already targets Postgres.
 3. Set `DATABASE_URL` and `AUTH_SECRET` in Vercel's environment variables.
 4. Run migrations against the production DB: `npx prisma migrate deploy`.
 
-Any Node host (Railway, Render, a VPS) also works: `npm run build && npm start`. On a VPS with a persistent disk, SQLite is fine as-is.
+Any Node host (Railway, Render, a VPS) also works: `npm run build && npm start`. On a VPS with a persistent disk, SQLite works too (see [Using SQLite locally](#using-sqlite-locally)).
 
 ## How the spaced repetition works
 
@@ -108,9 +118,19 @@ All external calls happen **server-side only**, centralized in [lib/dictionary.t
 
 Run the assistant's unit tests (parsers, normalization, fallbacks, caching) with `npm test`.
 
-## Grammar question APIs
+## Adaptive grammar question pool
 
-There is no reliable, free, keyless public API for grammar quiz questions, so the app ships with a local generator ([lib/grammar-quiz.ts](lib/grammar-quiz.ts)) and question bank ([lib/grammar-bank.ts](lib/grammar-bank.ts)). If you later want AI-generated questions, add a server route that calls the Claude API with your topics as context — keep the key in an env var on the server, never in client code.
+Grammar quizzes draw from three sources: questions built from **your own topics** ([lib/grammar-quiz.ts](lib/grammar-quiz.ts)), a built-in local bank ([lib/grammar-bank.ts](lib/grammar-bank.ts)), and a per-topic **database pool of generated questions** (`GeneratedGrammarQuestion`).
+
+How the pool behaves:
+
+- **Quiz start never blocks on AI** — it reads whatever is in the pool; if a topic's pool is low, a background top-up (cooldown-guarded) refills it for next time.
+- **Correct answers retire a question** as "mastered" (kept for history, never deleted); **wrong answers** go to the Mistake Bank and deprioritise the question.
+- **Providers** ([lib/ai/providers/](lib/ai/providers/)): Gemini, Groq, OpenRouter, Cloudflare Workers AI and Hugging Face — all with free tiers — tried in a configurable fallback order, plus an always-available **local rule-based generator**, so everything works with **zero API keys**.
+- **Enabling external providers** is opt-in: set `AI_QUIZ_ENABLED="true"` and at least one provider key in `.env` (see [.env.example](.env.example)). The grammar-topic edit page has a per-provider status/test panel and a manual "Generate more questions" button.
+- **Keys are server-side only** — read from `process.env` inside API routes, never sent to the client, never stored in the database, never logged.
+
+This is the one optional AI integration in the app; every other feature (dictionary, writing feedback, pronunciation scoring, cloze) is rule-based or uses free keyless sources.
 
 ## Project structure
 
@@ -128,10 +148,21 @@ app/
   (app)/mistakes             Mistake Bank
   (app)/stats                progress charts + history
   api/...                    REST endpoints (auth, cards, grammar, review, quiz,
+<<<<<<< HEAD
                              writing, pronunciation)
 components/                  UI kit, shell, feature components
 lib/                         db, auth, srs, quiz/cloze/writing/collections/
                              pronunciation logic, analytics, stats
+=======
+                             dictionary, writing, pronunciation, review/sync,
+                             grammar-mistakes, ai/test-provider)
+components/                  UI kit, shell, feature components
+lib/                         db, auth, srs, quiz/cloze/writing/collections/
+                             pronunciation/offline/gamification/reminders/theme
+                             logic, analytics, stats
+lib/ai/                      grammar-question generation: provider clients +
+                             orchestrator (fallback, validate, dedupe, score)
+>>>>>>> d2ea08d (Fix quiz answer ownership and provider hardening)
 prisma/                      schema, migrations, seed
 middleware.ts                session check + redirects
 ```

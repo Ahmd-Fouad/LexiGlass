@@ -174,6 +174,8 @@ export async function retireCorrectQuestion(
 
 export interface RecordWrongInput {
   userId: string;
+  /** Must already be verified to belong to userId (or null) — it's stored on
+   * the GrammarMistake row and joined back into the Mistake Bank UI. */
   grammarTopicId: string | null;
   generatedQuestionId?: string | null;
   quizSessionId?: string | null;
@@ -193,10 +195,13 @@ export interface RecordWrongInput {
 export async function recordWrongGrammarQuestion(
   input: RecordWrongInput
 ): Promise<{ mistakeId: string; mistakeCount: number }> {
-  // Bump the generated question, if this wrong answer came from one.
-  if (input.generatedQuestionId) {
+  // Bump the generated question, if this wrong answer came from one. The
+  // reference is only kept when the caller owns that question — GrammarMistake
+  // rows join its choices back into the Mistake Bank UI.
+  let generatedQuestionId = input.generatedQuestionId ?? null;
+  if (generatedQuestionId) {
     const q = await db.generatedGrammarQuestion.findUnique({
-      where: { id: input.generatedQuestionId },
+      where: { id: generatedQuestionId },
     });
     if (q && q.userId === input.userId) {
       await db.generatedGrammarQuestion.update({
@@ -208,6 +213,8 @@ export async function recordWrongGrammarQuestion(
           lastShownAt: new Date(), // deprioritise in normal quiz
         },
       });
+    } else {
+      generatedQuestionId = null;
     }
   }
 
@@ -216,8 +223,8 @@ export async function recordWrongGrammarQuestion(
     where: {
       userId: input.userId,
       status: { not: "resolved" },
-      ...(input.generatedQuestionId
-        ? { generatedQuestionId: input.generatedQuestionId }
+      ...(generatedQuestionId
+        ? { generatedQuestionId }
         : { grammarTopicId: input.grammarTopicId, question: input.question }),
     },
   });
@@ -242,7 +249,7 @@ export async function recordWrongGrammarQuestion(
     data: {
       userId: input.userId,
       grammarTopicId: input.grammarTopicId,
-      generatedQuestionId: input.generatedQuestionId ?? null,
+      generatedQuestionId,
       quizSessionId: input.quizSessionId ?? null,
       quizAnswerId: input.quizAnswerId ?? null,
       question: input.question,

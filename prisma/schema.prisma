@@ -1,6 +1,7 @@
 // LexiGlass database schema.
-// Default provider is SQLite for zero-setup local use.
-// To use Supabase/PostgreSQL: change provider to "postgresql" and set DATABASE_URL.
+// Provider is PostgreSQL (Supabase/Neon/Vercel Postgres) — set DATABASE_URL.
+// For zero-setup local SQLite instead: change provider to "sqlite", set
+// DATABASE_URL="file:./dev.db" and re-run migrate dev (fresh migrations).
 
 generator client {
   provider = "prisma-client-js"

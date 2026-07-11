@@ -32,15 +32,38 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Quiz session not found" }, { status: 404 });
     }
 
-    const flashcardId = str(body.flashcardId, 100);
-    const grammarTopicId = str(body.grammarTopicId, 100);
-    const generatedQuestionId = str(body.generatedQuestionId, 100);
+    const flashcardIdRaw = str(body.flashcardId, 100);
+    const grammarTopicIdRaw = str(body.grammarTopicId, 100);
+    const generatedQuestionIdRaw = str(body.generatedQuestionId, 100);
     const questionType = strOrEmpty(body.questionType, 50) || "mcq";
+
+    // Referenced entities must belong to the caller before they're attached to
+    // the answer or the mistake bank — the Mistake Bank joins topic titles and
+    // generated-question choices back into the UI, so a foreign id here would
+    // surface another user's content. Ids that don't resolve to an owned row
+    // are dropped (the answer itself is still recorded), which also keeps a
+    // deleted/bogus id from breaking the foreign-key constraint.
+    const [card, ownedTopic, ownedGenerated] = await Promise.all([
+      flashcardIdRaw
+        ? db.flashcard.findFirst({ where: { id: flashcardIdRaw, userId } })
+        : null,
+      grammarTopicIdRaw
+        ? db.grammarTopic.findFirst({ where: { id: grammarTopicIdRaw, userId }, select: { id: true } })
+        : null,
+      generatedQuestionIdRaw
+        ? db.generatedGrammarQuestion.findFirst({
+            where: { id: generatedQuestionIdRaw, userId },
+            select: { id: true },
+          })
+        : null,
+    ]);
+    const grammarTopicId = ownedTopic?.id ?? null;
+    const generatedQuestionId = ownedGenerated?.id ?? null;
 
     const answer = await db.quizAnswer.create({
       data: {
         sessionId,
-        flashcardId: flashcardId ?? undefined,
+        flashcardId: card?.id,
         grammarTopicId: grammarTopicId ?? undefined,
         questionType,
         question,
@@ -51,37 +74,34 @@ export async function POST(req: Request) {
     });
 
     // Vocabulary answers drive the SRS schedule.
-    if (flashcardId) {
-      const card = await db.flashcard.findUnique({ where: { id: flashcardId } });
-      if (card && card.userId === userId) {
-        const rating = ratingFromCorrectness(isCorrect);
-        const next = applyRating(card, rating);
-        await db.$transaction([
-          db.flashcard.update({
-            where: { id: card.id },
-            data: {
-              easeFactor: next.easeFactor,
-              intervalDays: next.intervalDays,
-              dueDate: next.dueDate,
-              reviewCount: { increment: 1 },
-              correctCount: { increment: isCorrect ? 1 : 0 },
-              incorrectCount: { increment: isCorrect ? 0 : 1 },
-              lapses: { increment: isCorrect ? 0 : 1 },
-              lastReviewedAt: new Date(),
-            },
-          }),
-          db.reviewLog.create({
-            data: {
-              userId,
-              flashcardId: card.id,
-              rating,
-              wasCorrect: isCorrect,
-              intervalBefore: card.intervalDays,
-              intervalAfter: next.intervalDays,
-            },
-          }),
-        ]);
-      }
+    if (card) {
+      const rating = ratingFromCorrectness(isCorrect);
+      const next = applyRating(card, rating);
+      await db.$transaction([
+        db.flashcard.update({
+          where: { id: card.id },
+          data: {
+            easeFactor: next.easeFactor,
+            intervalDays: next.intervalDays,
+            dueDate: next.dueDate,
+            reviewCount: { increment: 1 },
+            correctCount: { increment: isCorrect ? 1 : 0 },
+            incorrectCount: { increment: isCorrect ? 0 : 1 },
+            lapses: { increment: isCorrect ? 0 : 1 },
+            lastReviewedAt: new Date(),
+          },
+        }),
+        db.reviewLog.create({
+          data: {
+            userId,
+            flashcardId: card.id,
+            rating,
+            wasCorrect: isCorrect,
+            intervalBefore: card.intervalDays,
+            intervalAfter: next.intervalDays,
+          },
+        }),
+      ]);
     }
 
     // Generated grammar questions: retire correct, bank wrong + top up pool.
