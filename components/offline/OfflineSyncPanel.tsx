@@ -63,12 +63,13 @@ export default function OfflineSyncPanel() {
       const outcome: SyncOutcome = await syncQueuedReviewActions();
       if (!outcome.ok) {
         setMessage(outcome.error ?? "Sync failed — your queue is kept for the next try.");
-      } else if (outcome.applied + outcome.duplicates + outcome.rejected === 0) {
+      } else if (outcome.applied + outcome.duplicates + outcome.rejected + outcome.conflicts === 0) {
         setMessage("Nothing to sync.");
       } else {
         const parts = [`${outcome.applied} synced`];
         if (outcome.duplicates > 0) parts.push(`${outcome.duplicates} already synced`);
         if (outcome.rejected > 0) parts.push(`${outcome.rejected} skipped`);
+        if (outcome.conflicts > 0) parts.push(`${outcome.conflicts} conflicted and kept in queue`);
         setMessage(parts.join(" · "));
       }
     } finally {

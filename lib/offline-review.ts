@@ -133,7 +133,7 @@ export function prepareSyncActions(rawQueue: readonly unknown[]): QueuedReviewAc
 /** Per-action outcome reported by POST /api/review/sync. */
 export interface SyncActionResult {
   id: string;
-  status: "applied" | "duplicate" | "rejected";
+  status: "applied" | "duplicate" | "rejected" | "conflict";
   reason?: string;
 }
 
@@ -141,5 +141,6 @@ export interface SyncResponse {
   applied: number;
   duplicates: number;
   rejected: number;
+  conflicts: number;
   results: SyncActionResult[];
 }

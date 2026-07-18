@@ -295,10 +295,29 @@ model ReviewLog {
   flashcardId    String
   flashcard      Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
   rating         String // again | hard | good | easy
+  clientActionId String?
+  source         String    @default("online") // online | offline | quiz
   wasCorrect     Boolean
   intervalBefore Float
   intervalAfter  Float
+  easeFactorBefore Float?
+  easeFactorAfter  Float?
+  dueDateBefore    DateTime?
+  dueDateAfter     DateTime?
+  reviewCountBefore Int?
+  reviewCountAfter  Int?
+  correctCountBefore Int?
+  correctCountAfter  Int?
+  incorrectCountBefore Int?
+  incorrectCountAfter  Int?
+  lapsesBefore     Int?
+  lapsesAfter      Int?
+  lastReviewedAtBefore DateTime?
+  lastReviewedAtAfter  DateTime?
+  revertedAt       DateTime?
   reviewedAt     DateTime  @default(now())
 
   @@index([userId, reviewedAt])
+  @@index([userId, flashcardId, reviewedAt])
+  @@unique([userId, clientActionId])
 }

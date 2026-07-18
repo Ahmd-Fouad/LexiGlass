@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { badRequest, toErrorResponse } from "@/lib/api-helpers";
-import { applyRating, ratingFromCorrectness } from "@/lib/srs";
+import { ratingFromCorrectness } from "@/lib/srs";
+import { buildReviewTransition, reviewSnapshotData, reviewStateUpdate } from "@/lib/review-events";
 import { gradeIssuedAnswer, parseQuizAnswerSubmission } from "@/lib/quiz-authority";
 import { activateReplacementQuestion, RETIRE_AFTER_CORRECT } from "@/lib/grammar-question-pool";
 import type { QuizAnswerResult } from "@/lib/types";
@@ -103,28 +104,21 @@ async function gradeQuestion(
 
     if (item.flashcard) {
       const rating = ratingFromCorrectness(isCorrect);
-      const next = applyRating(item.flashcard, rating);
+      const reviewedAt = new Date();
+      const transition = buildReviewTransition(item.flashcard, rating, reviewedAt);
       await tx.flashcard.update({
         where: { id: item.flashcard.id },
-        data: {
-          easeFactor: next.easeFactor,
-          intervalDays: next.intervalDays,
-          dueDate: next.dueDate,
-          reviewCount: { increment: 1 },
-          correctCount: { increment: isCorrect ? 1 : 0 },
-          incorrectCount: { increment: isCorrect ? 0 : 1 },
-          lapses: { increment: isCorrect ? 0 : 1 },
-          lastReviewedAt: new Date(),
-        },
+        data: reviewStateUpdate(transition.after),
       });
       await tx.reviewLog.create({
         data: {
           userId,
           flashcardId: item.flashcard.id,
           rating,
+          source: "quiz",
           wasCorrect: isCorrect,
-          intervalBefore: item.flashcard.intervalDays,
-          intervalAfter: next.intervalDays,
+          reviewedAt,
+          ...reviewSnapshotData(transition),
         },
       });
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client";
 import { Button, Chip, ErrorBanner, GlassCard, Input, LinkButton } from "@/components/ui";
 import type { CardDTO } from "@/components/cards/card-dto";
@@ -22,12 +22,6 @@ interface RatedCard {
 
 interface UndoState {
   reviewLogId: string;
-  previous: {
-    easeFactor: number;
-    intervalDays: number;
-    dueDate: string;
-    lastReviewedAt: string | null;
-  };
 }
 
 interface ReviewResponse {
@@ -55,6 +49,8 @@ export default function ReviewSession({
   const [clozeEnabled, setClozeEnabled] = useState(true);
   const [clozeInput, setClozeInput] = useState("");
   const [clozeResult, setClozeResult] = useState<ClozeResult | null>(null);
+  // Kept across a failed request so a network retry uses the same durable id.
+  const pendingAction = useRef<{ id: string; cardId: string; rating: Rating } | null>(null);
 
   const card = sessionCards[index];
   const done = index >= sessionCards.length;
@@ -76,11 +72,14 @@ export default function ReviewSession({
       setBusy(true);
       setError(null);
       try {
+        pendingAction.current ??= { id: crypto.randomUUID(), cardId: card.id, rating };
+        const action = pendingAction.current;
         const res = await api<ReviewResponse>("/api/review", {
           method: "POST",
-          body: { flashcardId: card.id, rating },
+          body: { flashcardId: action.cardId, rating: action.rating, clientActionId: action.id },
         });
-        setResults((r) => [...r, { card, rating }]);
+        pendingAction.current = null;
+        setResults((r) => [...r, { card, rating: action.rating }]);
         setUndo(res.undo);
         setFlipped(false);
         // Let the flip animation reset before showing the next card.
