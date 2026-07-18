@@ -1,7 +1,6 @@
 // LexiGlass database schema.
-// Provider is PostgreSQL (Supabase/Neon/Vercel Postgres) — set DATABASE_URL.
-// For zero-setup local SQLite instead: change provider to "sqlite", set
-// DATABASE_URL="file:./dev.db" and re-run migrate dev (fresh migrations).
+// PostgreSQL is the only supported provider. Set DATABASE_URL before running
+// migrations or starting the application.
 
 generator client {
   provider = "prisma-client-js"
@@ -64,6 +63,7 @@ model Flashcard {
   quizQuestions QuizQuestion[]
 
   @@index([userId, dueDate])
+  @@index([userId, createdAt, id])
 }
 
 model GrammarTopic {
@@ -84,7 +84,7 @@ model GrammarTopic {
   generatedQuestions GeneratedGrammarQuestion[]
   grammarMistakes    GrammarMistake[]
 
-  @@index([userId])
+  @@index([userId, createdAt, id])
 }
 
 // A grammar quiz question generated for one topic — either by an external
@@ -296,6 +296,7 @@ model WritingAttempt {
   promptWords Json // WritingTarget[] the attempt was written against
   text        String // the user's writing
   feedback    Json // WritingFeedback (used/missing words, warnings, etc.)
+  schemaVersion Int    @default(1)
   score       Int      @default(0) // 0-100 overall score
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

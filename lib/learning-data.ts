@@ -185,17 +185,18 @@ export async function getWeaknessData(userId: string): Promise<WeaknessData> {
 async function getWeakestGrammarTopic(
   userId: string
 ): Promise<{ id: string; title: string } | null> {
-  const answers = await db.quizAnswer.findMany({
+  const answers = await db.quizAnswer.groupBy({
+    by: ["grammarTopicId", "isCorrect"],
     where: { grammarTopicId: { not: null }, session: { userId } },
-    select: { grammarTopicId: true, isCorrect: true },
+    _count: { _all: true },
   });
 
   const byTopic = new Map<string, { wrong: number; total: number }>();
   for (const a of answers) {
     if (!a.grammarTopicId) continue;
     const s = byTopic.get(a.grammarTopicId) ?? { wrong: 0, total: 0 };
-    s.total++;
-    if (!a.isCorrect) s.wrong++;
+    s.total += a._count._all;
+    if (!a.isCorrect) s.wrong += a._count._all;
     byTopic.set(a.grammarTopicId, s);
   }
 

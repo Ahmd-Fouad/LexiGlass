@@ -3,14 +3,30 @@ import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { badRequest, oneOf, readJsonBody, str, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
 
-export async function GET() {
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 100;
+
+export async function GET(req: Request) {
   try {
     const userId = await requireUserId();
+    const url = new URL(req.url);
+    const requestedLimit = Number(url.searchParams.get("limit") ?? DEFAULT_PAGE_SIZE);
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), MAX_PAGE_SIZE)
+      : DEFAULT_PAGE_SIZE;
+    const cursor = url.searchParams.get("cursor") || undefined;
     const cards = await db.flashcard.findMany({
       where: { userId },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-    return NextResponse.json({ cards });
+    const hasMore = cards.length > limit;
+    const page = hasMore ? cards.slice(0, limit) : cards;
+    return NextResponse.json({
+      cards: page,
+      nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
+    });
   } catch (e) {
     return toErrorResponse(e);
   }
