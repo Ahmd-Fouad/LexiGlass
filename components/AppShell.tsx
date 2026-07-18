@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { clearOfflineData, countQueuedActions, syncQueuedReviewActions } from "@/lib/client-offline";
 import OfflineStatus from "@/components/offline/OfflineStatus";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: "◈" },
@@ -111,6 +112,7 @@ export default function AppShell({ children, userName, userKey }: { children: Re
         <div className="mt-4 border-t border-white/10 pt-4">
           <p className="truncate px-2 text-sm font-medium">{userName}</p>
           <OfflineStatus userKey={userKey} className="mt-1 px-2" />
+          <ThemeToggle className="mt-2 w-full justify-start" />
           <button
             onClick={logout}
             disabled={logoutBusy}
@@ -129,6 +131,7 @@ export default function AppShell({ children, userName, userKey }: { children: Re
             Lexi<span className="bg-gradient-to-r from-violet-glow to-teal-glow bg-clip-text text-transparent">Glass</span>
           </Link>
           <div className="flex items-center gap-3">
+            <ThemeToggle className="!px-2 [&>span:last-child]:hidden" />
             <OfflineStatus userKey={userKey} />
             <button onClick={logout} disabled={logoutBusy} className="text-sm text-ink-muted hover:text-ink">
               {logoutBusy ? "Signing out…" : "Sign out"}

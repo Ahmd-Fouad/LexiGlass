@@ -1,18 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { applyTheme, saveThemePreference, type Theme } from "@/lib/theme";
+import { applyTheme, getInitialTheme, saveThemePreference, type Theme } from "@/lib/theme";
 
 /**
- * Dark/light switch. The initial theme is stamped on <html data-theme> by the
- * inline bootstrap script in the root layout before paint; this component only
- * reads it after mount, so SSR always renders the same neutral placeholder.
+ * Dark/light switch. Preference resolution happens after mount without unsafe
+ * inline script; SSR renders the neutral disabled state first.
  */
 export default function ThemeToggle({ className = "" }: { className?: string }) {
   const [theme, setTheme] = useState<Theme | null>(null);
 
   useEffect(() => {
-    setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+    const initial = getInitialTheme();
+    applyTheme(initial);
+    setTheme(initial);
   }, []);
 
   function toggle() {
