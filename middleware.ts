@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 import { isTrustedRequestOrigin } from "@/lib/request-security";
+import { requestId } from "@/lib/request-id";
 
 const PUBLIC_PATHS = ["/login", "/register"];
 
@@ -17,6 +18,16 @@ async function isAuthenticated(req: NextRequest): Promise<boolean> {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const correlationId = requestId(req.headers);
+
+  function proceed(privateResponse = false) {
+    const requestHeaders = new Headers(req.headers);
+    requestHeaders.set("x-request-id", correlationId);
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set("X-Request-ID", correlationId);
+    if (privateResponse) response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  }
 
   // API authentication remains in route handlers, but all browser mutations
   // cross this centralized same-origin gate before any body is processed.
@@ -27,17 +38,17 @@ export async function middleware(req: NextRequest) {
       referer: req.headers.get("referer"),
       configuredOrigin: process.env.APP_ORIGIN,
     })) {
-      return NextResponse.json({ error: "Untrusted request origin" }, {
+      return NextResponse.json({ error: "Untrusted request origin", code: "UNTRUSTED_ORIGIN" }, {
         status: 403,
-        headers: { "Cache-Control": "no-store" },
+        headers: { "Cache-Control": "no-store", "X-Request-ID": correlationId },
       });
     }
-    return NextResponse.next();
+    return proceed(true);
   }
 
   // The offline fallback page must be reachable (and precacheable by the
   // service worker) without a session; it renders no user data itself.
-  if (pathname === "/offline") return NextResponse.next();
+  if (pathname === "/offline") return proceed();
 
   const authed = await isAuthenticated(req);
 
@@ -45,18 +56,24 @@ export async function middleware(req: NextRequest) {
     // The server page performs the version-aware session lookup. Middleware
     // only knows the JWT signature and must not redirect a revoked token into
     // a login/dashboard loop.
-    return NextResponse.next();
+    return proceed();
   }
 
   if (!authed) {
-    return NextResponse.redirect(new URL("/login", req.url));
+    const response = NextResponse.redirect(new URL("/login", req.url));
+    response.headers.set("Cache-Control", "no-store");
+    response.headers.set("X-Request-ID", correlationId);
+    return response;
   }
 
   if (pathname === "/") {
-    return NextResponse.redirect(new URL("/dashboard", req.url));
+    const response = NextResponse.redirect(new URL("/dashboard", req.url));
+    response.headers.set("Cache-Control", "no-store");
+    response.headers.set("X-Request-ID", correlationId);
+    return response;
   }
 
-  return NextResponse.next();
+  return proceed(true);
 }
 
 export const config = {

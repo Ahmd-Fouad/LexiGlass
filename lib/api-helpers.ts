@@ -1,14 +1,29 @@
 import { NextResponse } from "next/server";
 
+function errorResponse(message: string, status: number, code: string, requestId?: string): Response {
+  return NextResponse.json(
+    { error: message, code, ...(requestId ? { requestId } : {}) },
+    { status, headers: { "Cache-Control": "no-store", ...(requestId ? { "X-Request-ID": requestId } : {}) } }
+  );
+}
+
 /** Converts thrown Responses (e.g. from requireUserId) into route responses. */
 export function toErrorResponse(e: unknown): Response {
   if (e instanceof Response) return e;
-  console.error(e);
-  return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
+  const correlationId = crypto.randomUUID();
+  const errorName = e instanceof Error ? e.name : "UnknownError";
+  console.error(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level: "error",
+    event: "api_request_failed",
+    requestId: correlationId,
+    errorName,
+  }));
+  return errorResponse("Something went wrong", 500, "INTERNAL_ERROR", correlationId);
 }
 
 export function badRequest(message: string): Response {
-  return NextResponse.json({ error: message }, { status: 400 });
+  return errorResponse(message, 400, "VALIDATION_ERROR");
 }
 
 /** Returns trimmed string field or null. */
