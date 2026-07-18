@@ -32,10 +32,14 @@ The app uses:
 - bcrypt for password hashing
 - jose JWT cookies for authentication
 - Server-side Prisma queries
+- Node.js test runner through tsx for unit tests
+- Playwright for E2E and browser testing
 - Custom local UI components
-- Dark glassmorphism UI
+- Dark/light glassmorphism UI
 
 PostgreSQL is the only supported database. Use an isolated disposable PostgreSQL database for integration and browser tests.
+
+The `production-stabilization` branch is a production-candidate baseline, not production-ready. Production readiness requires CI, disposable-PostgreSQL integration and concurrency tests, forward migration verification, Playwright E2E, accessibility checks, and staging verification to pass.
 
 ## 3. Existing core features
 
@@ -52,6 +56,16 @@ The app already has:
 - Vocabulary quiz
 - Grammar quiz
 - Stats/progress page
+- Mistake Bank
+- Smart Daily Study Plan
+- Weakness Analytics
+- Cloze Cards
+- Writing Practice
+- Pronunciation Practice
+- Study Collections
+- PWA/offline review
+- Dark and light themes
+- Security and ownership hardening
 - Seed data and demo account
 
 Main database models:
@@ -94,6 +108,16 @@ JWT cookies must remain httpOnly. In production, cookies should use secure setti
 JWTs include a database-checked session version so logout-all can revoke old sessions. Unsafe browser API methods must pass centralized same-origin Origin/Referer checks. Auth, provider, dictionary, quiz, review, sync, and writing endpoints use database-backed rate limits.
 
 Every online or offline review action has a durable client action ID. Database uniqueness guarantees one schedule transition. ReviewLog stores authoritative before/after SRS snapshots; undo restores only the latest server snapshot and never trusts client-supplied prior state.
+
+Current security architecture:
+
+- `QuizQuestion` is the server-authoritative record for every issued quiz question.
+- Correct answers and grading data are not sent to the browser before submission.
+- `ReviewLog` stores authoritative before/after SRS snapshots for exact undo.
+- Review submissions use durable client action IDs with database uniqueness.
+- `RateLimitBucket` provides database-backed rate limiting and abuse controls.
+- JWT `sessionVersion` supports explicit session revocation.
+- Unsafe API mutations require centralized same-origin Origin/Referer validation.
 
 ## 5. Flashcard behavior
 
@@ -455,7 +479,18 @@ Expected behavior:
 
 ## 16. Current verified status from latest work
 
-Recent fixes already done or expected to be preserved:
+The current `production-stabilization` branch is a production-candidate baseline. It must not be described as production-ready until CI, PostgreSQL integration and concurrency tests, migrations, Playwright E2E, accessibility, and staging verification all pass.
+
+Latest local verification:
+
+- 321 unit tests passed locally.
+- TypeScript passed with `npm run typecheck`.
+- Lint passed with `npm run lint`.
+- Prisma schema validation passed.
+- The production build passed without outbound font/network dependencies.
+- PostgreSQL integration tests and Playwright/E2E require a configured isolated PostgreSQL database and have not passed locally.
+
+Implemented behavior that must be preserved:
 
 - Production build issue with `Input ref` was fixed using `React.forwardRef`.
 - Smart Definition and Example Assistant was added.
@@ -467,14 +502,16 @@ Recent fixes already done or expected to be preserved:
 - Pronunciation and lower Word Type inputs were hidden from the form.
 - "Use pronunciation" and "Use as word type" buttons were removed.
 - Dictionary tests were updated.
-- 54 tests passed in the latest Claude run.
-- `npm run build` passed in the latest Claude run.
+- Quiz grading is server-authoritative and replay-safe.
+- Review scheduling is idempotent and undo uses server snapshots.
+- Offline logout protects queued work and clears private account data.
+- Security headers, request IDs, same-origin mutation checks, session revocation, and database rate limiting are implemented.
 
 Do not regress these behaviors.
 
 ## 17. Testing expectations
 
-Use a free testing setup such as Vitest.
+Unit tests use the Node.js test runner through tsx. Browser and E2E tests use Playwright. Database integration and browser tests must use isolated disposable PostgreSQL, which is the only supported database.
 
 Important tests:
 
@@ -502,50 +539,40 @@ Run:
 
 ```bash
 npm test
+npm run typecheck
+npm run lint
 npm run build
 ```
 
-## 18. Features planned next
+PostgreSQL integration uses:
 
-Future high-value free features:
-
-1. Mistake Bank
-2. Smart Daily Study Plan
-3. Weakness Analytics
-4. Cloze Cards
-5. Writing Practice Mode
-6. Pronunciation Practice using browser APIs
-7. Topic-Based Decks / Study Collections
-8. PWA and Offline Review
-9. Browser Notifications / Study Reminder
-10. Gamification
-11. Light Mode
-12. Accessibility and UX improvements
-13. More tests
-14. Security and ownership audit
-15. Portfolio README polish
-
-Do not start all at once unless explicitly asked. Implement one feature at a time and keep the build passing.
-
-## 19. Recommended next feature priority
-
-The best next feature is:
-
-```txt
-Mistake Bank + Smart Daily Study Plan + Weakness Analytics
+```bash
+RUN_DB_INTEGRATION=1 npm run test:integration
+npm run test:e2e
 ```
 
-Reason:
+These commands require a configured, migrated, non-development PostgreSQL test database.
 
-These use data already saved in the app:
+## 18. Implemented study and platform features
 
-- QuizAnswer
-- QuizSession
-- ReviewLog
-- Flashcard
-- GrammarTopic
+Mistake Bank, Smart Daily Study Plan, Weakness Analytics, Cloze Cards, Writing Practice, Pronunciation Practice, Study Collections, PWA/offline review, light mode, and security/ownership hardening are implemented. They are current product behavior, not planned work.
 
-They add high product value without paid APIs.
+## 19. Remaining future work
+
+Priorities after the stabilized baseline:
+
+1. Make CI pass against disposable PostgreSQL.
+2. Complete PostgreSQL integration and concurrency testing.
+3. Complete Playwright and accessibility testing.
+4. Add email verification and account recovery.
+5. Add import/export.
+6. Add production observability and alerting.
+7. Verify backup and restore procedures.
+8. Optimize analytics for large accounts.
+9. Add optional reminders.
+10. Add user-created decks if required.
+
+Do not start these all at once unless explicitly requested. Stabilization verification comes before new product work.
 
 ## 20. Development rules
 
@@ -562,7 +589,7 @@ When modifying the project:
 - centralize reusable UI in `components/`
 - keep TypeScript strict
 - avoid `any`
-- preserve the dark glassmorphism design
+- preserve the dark/light glassmorphism design
 - make UI mobile-friendly
 - do not overwrite user input automatically
 - keep fields manually editable
@@ -578,6 +605,8 @@ npx prisma migrate dev
 npm run db:seed
 npm run dev
 npm test
+npm run typecheck
+npm run lint
 npm run build
 ```
 
