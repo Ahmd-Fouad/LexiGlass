@@ -1,14 +1,6 @@
 import type { Metadata } from "next";
-import { Fraunces, Sora } from "next/font/google";
 import "./globals.css";
 import ServiceWorkerRegistrar from "@/components/offline/ServiceWorkerRegistrar";
-
-const sora = Sora({ subsets: ["latin"], variable: "--font-sora" });
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-fraunces",
-});
 
 export const metadata: Metadata = {
   title: "LexiGlass — English study companion",
@@ -17,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sora.variable} ${fraunces.variable}`}>
+    <html lang="en">
       <body>
         <div className="aurora" aria-hidden />
         {children}
