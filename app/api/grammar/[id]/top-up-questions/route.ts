@@ -7,6 +7,7 @@ import {
   shouldTopUpQuestionPool,
   topUpQuestionPool,
 } from "@/lib/grammar-question-pool";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -14,9 +15,11 @@ type Params = { params: Promise<{ id: string }> };
  * Tops up the question pool only when it's low (respects the generation
  * cooldown). Safe to call opportunistically from the client.
  */
-export async function POST(_req: Request, { params }: Params) {
+export async function POST(req: Request, { params }: Params) {
   try {
     const userId = await requireUserId();
+    const limited = await enforceRateLimit({ req, action: "grammarTopUp", userId });
+    if (limited) return limited;
     const { id } = await params;
 
     const topic = await db.grammarTopic.findFirst({ where: { id, userId } });

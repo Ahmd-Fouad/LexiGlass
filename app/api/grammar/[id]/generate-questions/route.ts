@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-helpers";
 import { getQuestionPoolStats, topUpQuestionPool } from "@/lib/grammar-question-pool";
 import { getConfiguredExternalProviders, isAiQuizEnabled } from "@/lib/ai/quiz-generator";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -12,9 +13,11 @@ type Params = { params: Promise<{ id: string }> };
  * (bypassing the cooldown), validates and saves the valid ones. Never fails
  * the request when a provider fails — the result reports what happened.
  */
-export async function POST(_req: Request, { params }: Params) {
+export async function POST(req: Request, { params }: Params) {
   try {
     const userId = await requireUserId();
+    const limited = await enforceRateLimit({ req, action: "grammarGenerate", userId });
+    if (limited) return limited;
     const { id } = await params;
 
     const topic = await db.grammarTopic.findFirst({ where: { id, userId } });

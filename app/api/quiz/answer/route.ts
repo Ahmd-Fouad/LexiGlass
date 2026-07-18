@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, readJsonBody, toErrorResponse } from "@/lib/api-helpers";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { ratingFromCorrectness } from "@/lib/srs";
 import { buildReviewTransition, reviewSnapshotData, reviewStateUpdate } from "@/lib/review-events";
 import { gradeIssuedAnswer, parseQuizAnswerSubmission } from "@/lib/quiz-authority";
@@ -19,7 +20,11 @@ type TransactionResult = { result: QuizAnswerResult; replacementTopicId: string 
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    const body = await req.json().catch(() => ({}));
+    const limited = await enforceRateLimit({ req, action: "quizAnswer", userId });
+    if (limited) return limited;
+    const parsed = await readJsonBody(req, 4 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
     const submission = parseQuizAnswerSubmission(body);
     if (!submission) {
       return badRequest("Question content and grading fields are server-authoritative.");

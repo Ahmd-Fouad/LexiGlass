@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, str, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, readJsonBody, str, toErrorResponse } from "@/lib/api-helpers";
 
 /** Restores the latest review from the server-stored authoritative snapshot. */
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    const body = await req.json().catch(() => ({}));
+    const parsed = await readJsonBody(req, 2 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
     const reviewLogId = str(body.reviewLogId, 100);
     if (!reviewLogId) return badRequest("reviewLogId is required.");
 

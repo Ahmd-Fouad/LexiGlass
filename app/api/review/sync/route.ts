@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { Prisma, type Flashcard } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, readJsonBody, toErrorResponse } from "@/lib/api-helpers";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { buildReviewTransition, reviewSnapshotData, reviewStateUpdate } from "@/lib/review-events";
 import {
   isActionTimestampUsable,
@@ -16,7 +17,11 @@ import {
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    const body = await req.json().catch(() => ({}));
+    const limited = await enforceRateLimit({ req, action: "reviewSync", userId });
+    if (limited) return limited;
+    const parsed = await readJsonBody(req, 128 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
     if (!Array.isArray(body.actions) || body.actions.length === 0) {
       return badRequest("actions must be a non-empty array.");
     }

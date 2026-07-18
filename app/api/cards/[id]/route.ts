@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, oneOf, str, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, oneOf, readJsonBody, str, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,7 +31,9 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json({ error: "Card not found" }, { status: 404 });
     }
 
-    const body = await req.json().catch(() => ({}));
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
     const text = str(body.text, 200);
     const meaning = str(body.meaning, 1000);
     if (!text) return badRequest("Please enter the word or phrase.");

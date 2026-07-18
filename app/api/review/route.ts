@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, str, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, readJsonBody, str, toErrorResponse } from "@/lib/api-helpers";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { type Rating } from "@/lib/srs";
 import { buildReviewTransition, reviewSnapshotData, reviewStateUpdate } from "@/lib/review-events";
 
@@ -12,7 +13,11 @@ const RATINGS: Rating[] = ["again", "hard", "good", "easy"];
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    const body = await req.json().catch(() => ({}));
+    const limited = await enforceRateLimit({ req, action: "reviewOnline", userId });
+    if (limited) return limited;
+    const parsed = await readJsonBody(req, 4 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
     const flashcardId = str(body.flashcardId, 100);
     const clientActionId = str(body.clientActionId, 100);
     const rating = RATINGS.includes(body.rating as Rating) ? body.rating as Rating : null;

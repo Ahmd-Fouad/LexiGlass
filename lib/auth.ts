@@ -11,8 +11,12 @@ function getSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-export async function createSession(userId: string) {
-  const token = await new SignJWT({ sub: userId })
+export async function createSession(userId: string, knownVersion?: number) {
+  const sessionVersion = knownVersion ?? (await db.user.findUnique({
+    where: { id: userId }, select: { sessionVersion: true },
+  }))?.sessionVersion;
+  if (sessionVersion == null) throw new Error("Cannot create a session for an unknown user");
+  const token = await new SignJWT({ sub: userId, ver: sessionVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_DAYS}d`)
@@ -40,7 +44,11 @@ export async function getSessionUserId(): Promise<string | null> {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, getSecret());
-    return (payload.sub as string) ?? null;
+    const userId = typeof payload.sub === "string" ? payload.sub : null;
+    const version = typeof payload.ver === "number" ? payload.ver : null;
+    if (!userId || version == null) return null;
+    const user = await db.user.findUnique({ where: { id: userId }, select: { sessionVersion: true } });
+    return user?.sessionVersion === version ? userId : null;
   } catch {
     return null;
   }

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, oneOf, str, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, oneOf, readJsonBody, str, toErrorResponse } from "@/lib/api-helpers";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { buildVocabQuestions, MIN_CARDS_FOR_QUIZ, selectQuizCards } from "@/lib/quiz";
 import {
   buildGrammarQuiz,
@@ -28,7 +29,11 @@ const MAX_BACKGROUND_TOPUPS = 2;
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    const body = await req.json().catch(() => ({}));
+    const limited = await enforceRateLimit({ req, action: "quizStart", userId });
+    if (limited) return limited;
+    const parsed = await readJsonBody(req, 4 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
     const type = oneOf(body.type, ["vocab", "grammar"] as const, "vocab");
 
     let questions;

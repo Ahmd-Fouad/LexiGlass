@@ -55,7 +55,8 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                minLength={mode === "register" ? 8 : undefined}
+                minLength={mode === "register" ? 10 : undefined}
+                maxLength={128}
               />
             </Field>
 

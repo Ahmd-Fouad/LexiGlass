@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, oneOf, str, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, oneOf, readJsonBody, str, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
 
 export async function GET() {
   try {
@@ -19,7 +19,9 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    const body = await req.json().catch(() => ({}));
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
 
     const title = str(body.title, 200);
     const explanation = str(body.explanation, 5000);

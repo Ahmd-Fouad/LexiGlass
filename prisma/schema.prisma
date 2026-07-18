@@ -18,6 +18,7 @@ model User {
   name               String
   passwordHash       String
   createdAt          DateTime                   @default(now())
+  sessionVersion     Int                        @default(1)
   flashcards         Flashcard[]
   grammarTopics      GrammarTopic[]
   quizSessions       QuizSession[]
@@ -215,6 +216,21 @@ model QuizAnswer {
   @@index([sessionId])
   @@index([flashcardId, createdAt])
   @@index([grammarTopicId, createdAt])
+}
+
+// Fixed-window abuse-control bucket. Keys are one-way hashes of endpoint and
+// privacy-safe identity inputs; raw IP/email values are never stored.
+model RateLimitBucket {
+  key          String   @id
+  action       String
+  count        Int      @default(0)
+  windowStart  DateTime
+  blockedUntil DateTime?
+  expiresAt    DateTime
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@index([action, windowStart])
 }
 
 // One server-authoritative question issued as part of a quiz session. The
