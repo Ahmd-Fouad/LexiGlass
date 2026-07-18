@@ -19,14 +19,14 @@ export async function POST(req: Request) {
     const correctCount = await db.quizAnswer.count({
       where: { sessionId, isCorrect: true },
     });
-    const answered = await db.quizAnswer.count({ where: { sessionId } });
-
     const updated = await db.quizSession.update({
       where: { id: sessionId },
       data: {
         finishedAt: new Date(),
         correctCount,
-        totalQuestions: Math.max(session.totalQuestions, answered),
+        // Issued-question count was fixed atomically when the session started;
+        // the client cannot inflate it by submitting arbitrary answers.
+        totalQuestions: session.totalQuestions,
       },
     });
     return NextResponse.json({ session: updated });

@@ -218,12 +218,35 @@ async function createMistakeBankFixture(email: string) {
       totalQuestions: 2,
       correctCount: 1,
       finishedAt: new Date(),
+      questions: {
+        create: [
+          {
+            orderIndex: 0,
+            grammarTopicId: legacyTopic.id,
+            questionType: "mcq",
+            prompt: "E2E legacy fixture: Which sentence is correct?",
+            correctAnswer: "I saw him yesterday.",
+            answeredAt: new Date(),
+          },
+          {
+            orderIndex: 1,
+            grammarTopicId: legacyTopic.id,
+            questionType: "mcq",
+            prompt: "E2E legacy fixture: Choose the experience sentence.",
+            correctAnswer: "I have visited Japan twice.",
+            answeredAt: new Date(),
+          },
+        ],
+      },
     },
+    include: { questions: { orderBy: { orderIndex: "asc" } } },
   });
   await db.quizAnswer.createMany({
     data: [
       {
         sessionId: session.id,
+        quizQuestionId: session.questions[0].id,
+        submissionId: "e2e-legacy-wrong",
         grammarTopicId: legacyTopic.id,
         questionType: "mcq",
         question: "E2E legacy fixture: Which sentence is correct?",
@@ -233,6 +256,8 @@ async function createMistakeBankFixture(email: string) {
       },
       {
         sessionId: session.id,
+        quizQuestionId: session.questions[1].id,
+        submissionId: "e2e-legacy-correct",
         grammarTopicId: legacyTopic.id,
         questionType: "mcq",
         question: "E2E legacy fixture: Choose the experience sentence.",

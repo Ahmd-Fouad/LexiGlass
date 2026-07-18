@@ -60,6 +60,7 @@ model Flashcard {
   updatedAt   DateTime     @updatedAt
   reviewLogs  ReviewLog[]
   quizAnswers QuizAnswer[]
+  quizQuestions QuizQuestion[]
 
   @@index([userId, dueDate])
 }
@@ -78,6 +79,7 @@ model GrammarTopic {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   quizAnswers    QuizAnswer[]
+  quizQuestions  QuizQuestion[]
   generatedQuestions GeneratedGrammarQuestion[]
   grammarMistakes    GrammarMistake[]
 
@@ -120,6 +122,7 @@ model GeneratedGrammarQuestion {
   updatedAt      DateTime  @updatedAt
 
   grammarMistakes GrammarMistake[]
+  quizQuestions   QuizQuestion[]
 
   @@index([grammarTopicId, status])
   @@index([userId, grammarTopicId, status])
@@ -185,6 +188,7 @@ model QuizSession {
   startedAt      DateTime     @default(now())
   finishedAt     DateTime?
   answers        QuizAnswer[]
+  questions      QuizQuestion[]
 
   @@index([userId, startedAt])
 }
@@ -193,6 +197,9 @@ model QuizAnswer {
   id             String        @id @default(cuid())
   sessionId      String
   session        QuizSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  quizQuestionId String        @unique
+  quizQuestion   QuizQuestion  @relation(fields: [quizQuestionId], references: [id], onDelete: Cascade)
+  submissionId  String
   flashcardId    String?
   flashcard      Flashcard?    @relation(fields: [flashcardId], references: [id], onDelete: SetNull)
   grammarTopicId String?
@@ -203,6 +210,44 @@ model QuizAnswer {
   userAnswer     String
   isCorrect      Boolean
   createdAt      DateTime      @default(now())
+
+  @@unique([sessionId, submissionId])
+  @@index([sessionId])
+  @@index([flashcardId, createdAt])
+  @@index([grammarTopicId, createdAt])
+}
+
+// One server-authoritative question issued as part of a quiz session. The
+// answer and explanation never leave the server until this item is graded.
+model QuizQuestion {
+  id                      String                    @id @default(cuid())
+  sessionId               String
+  session                 QuizSession               @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  orderIndex              Int
+  questionType            String
+  prompt                  String
+  context                 String?
+  options                 Json?
+  correctAnswer           String
+  explanation             String?
+  cardKind                String?
+  tags                    Json?
+  flashcardId             String?
+  flashcard               Flashcard?                @relation(fields: [flashcardId], references: [id], onDelete: SetNull)
+  grammarTopicId          String?
+  grammarTopic            GrammarTopic?             @relation(fields: [grammarTopicId], references: [id], onDelete: SetNull)
+  generatedQuestionId     String?
+  generatedQuestion       GeneratedGrammarQuestion? @relation(fields: [generatedQuestionId], references: [id], onDelete: SetNull)
+  schemaVersion           Int                       @default(1)
+  answeredAt              DateTime?
+  createdAt               DateTime                  @default(now())
+  answer                  QuizAnswer?
+
+  @@unique([sessionId, orderIndex])
+  @@index([sessionId, answeredAt])
+  @@index([flashcardId])
+  @@index([grammarTopicId])
+  @@index([generatedQuestionId])
 }
 
 // Cached external dictionary lookups (dictionaryapi.dev, FreeDictionaryAPI,

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { badRequest, oneOf, str, toErrorResponse } from "@/lib/api-helpers";
@@ -11,7 +12,7 @@ import {
 } from "@/lib/grammar-quiz";
 import { getRecentMistakeCounts } from "@/lib/learning-data";
 import { POOL_LOW_THRESHOLD, topUpQuestionPool } from "@/lib/grammar-question-pool";
-import type { StartQuizResponse, VocabQuizMode } from "@/lib/types";
+import type { IssuedQuizQuestion, StartQuizResponse, VocabQuizMode } from "@/lib/types";
 
 const GENERATED_FETCH_LIMIT = 80;
 const MAX_BACKGROUND_TOPUPS = 2;
@@ -87,26 +88,63 @@ export async function POST(req: Request) {
 
       questions = buildGrammarQuiz(topics, { topicStats, generatedQuestions });
 
-      // Mark the generated questions we actually used as shown, so they rotate.
-      const usedGeneratedIds = questions
-        .map((q) => q.generatedQuestionId)
-        .filter((id): id is string => !!id);
-      if (usedGeneratedIds.length > 0) {
-        await db.generatedGrammarQuestion.updateMany({
-          where: { id: { in: usedGeneratedIds }, userId },
-          data: { lastShownAt: new Date(), timesShown: { increment: 1 } },
-        });
-      }
-
       // Non-blocking: top up the weakest low pools for next time.
       void triggerBackgroundTopUp(userId, topics, topicStats);
     }
 
-    const session = await db.quizSession.create({
-      data: { userId, type, totalQuestions: questions.length },
+    // The session and every authoritative question are created atomically. The
+    // browser receives only presentation fields and the persisted question id.
+    const session = await db.$transaction(async (tx) => {
+      const created = await tx.quizSession.create({
+        data: {
+          userId,
+          type,
+          totalQuestions: questions.length,
+          questions: {
+            create: questions.map((q, orderIndex) => ({
+              orderIndex,
+              questionType: q.type,
+              prompt: q.prompt,
+              context: q.context,
+              options: q.options as Prisma.InputJsonValue | undefined,
+              correctAnswer: q.answer,
+              explanation: q.explanation,
+              cardKind: q.kind,
+              tags: q.tags as Prisma.InputJsonValue | undefined,
+              flashcardId: q.flashcardId,
+              grammarTopicId: q.grammarTopicId,
+              generatedQuestionId: q.generatedQuestionId,
+            })),
+          },
+        },
+        include: { questions: { orderBy: { orderIndex: "asc" } } },
+      });
+
+      const usedGeneratedIds = questions
+        .map((q) => q.generatedQuestionId)
+        .filter((id): id is string => Boolean(id));
+      if (usedGeneratedIds.length > 0) {
+        await tx.generatedGrammarQuestion.updateMany({
+          where: { id: { in: usedGeneratedIds }, userId },
+          data: { lastShownAt: new Date(), timesShown: { increment: 1 } },
+        });
+      }
+      return created;
     });
 
-    const response: StartQuizResponse = { sessionId: session.id, questions };
+    const publicQuestions: IssuedQuizQuestion[] = session.questions.map((q) => ({
+      id: q.id,
+      type: q.questionType as IssuedQuizQuestion["type"],
+      prompt: q.prompt,
+      ...(q.context ? { context: q.context } : {}),
+      ...(Array.isArray(q.options) ? { options: q.options as string[] } : {}),
+      ...(q.cardKind === "word" || q.cardKind === "phrase" ? { kind: q.cardKind } : {}),
+      ...(Array.isArray(q.tags) ? { tags: q.tags as string[] } : {}),
+      ...(q.flashcardId ? { flashcardId: q.flashcardId } : {}),
+      ...(q.grammarTopicId ? { grammarTopicId: q.grammarTopicId } : {}),
+      ...(q.generatedQuestionId ? { generatedQuestionId: q.generatedQuestionId } : {}),
+    }));
+    const response: StartQuizResponse = { sessionId: session.id, questions: publicQuestions };
     return NextResponse.json(response);
   } catch (e) {
     return toErrorResponse(e);
