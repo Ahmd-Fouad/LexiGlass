@@ -16,6 +16,10 @@ npx prisma migrate dev      # apply/create migrations
 npm run db:seed             # tsx prisma/seed.ts — demo account with sample data
 npm run dev                 # http://localhost:3000
 npm test                    # node --import tsx --test "tests/**/*.test.ts"
+npm run typecheck
+npm run lint
+npm run test:integration    # isolated PostgreSQL + RUN_DB_INTEGRATION=1
+npm run test:e2e            # migrated isolated PostgreSQL required
 npm run build
 ```
 
@@ -27,11 +31,15 @@ Demo account (after seeding): `demo@lexiglass.app` / `demo1234`
 
 ## Database
 
-`prisma/schema.prisma` provider is currently **`postgresql`** (switched from the SQLite default per the README's deployment instructions — set `DATABASE_URL` accordingly). Models: `User`, `Flashcard` (word or phrase, distinguished by `kind`, holds all SRS state), `GrammarTopic`, `QuizSession`/`QuizAnswer`, `ReviewLog` (one row per SRS review), `DictionaryCache` (versioned cache for external lookups, definitions and examples cached separately under `type`).
+`prisma/schema.prisma` uses **PostgreSQL**, the only supported provider. `QuizQuestion` stores server grading authority; `ReviewLog` stores idempotency and authoritative undo snapshots; `RateLimitBucket` provides durable abuse controls. Production releases apply committed migrations with `npm run db:deploy` and never reset or automatically seed production.
 
 ## Architecture
 
-**Auth**: JWT session cookie (`lexiglass_session`, `jose`, httpOnly, 30-day expiry) set by `lib/auth.ts`. `middleware.ts` gates all non-API pages (redirects unauthenticated → `/login`, authenticated-on-auth-pages → `/dashboard`); API routes self-check via `requireUserId()` in `lib/auth.ts`, which throws a `Response` (401) caught by `toErrorResponse()` in `lib/api-helpers.ts`.
+**Auth**: JWT session cookie (`lexiglass_session`, `jose`, httpOnly, 30-day expiry) includes a database-checked session version. Middleware gates pages, validates Origin/Referer on unsafe APIs, and attaches request-ID/no-store headers. API routes self-check via `requireUserId()`.
+
+**Quiz/review authority**: quiz start persists `QuizQuestion` rows and returns public payloads only. Quiz answer accepts session/question/submission IDs plus the user's answer, then performs grading, answer persistence, SRS, logs, and mistakes atomically. Question/submission uniqueness prevents replay. Online/offline reviews require a database-unique `clientActionId`; undo restores the latest server snapshot.
+
+**Offline privacy**: IndexedDB records are account-scoped. Logout offers sync/discard/cancel for queued actions and clears only LexiGlass private stores. APIs and authenticated HTML must never enter the service-worker cache.
 
 **Per-user data isolation is load-bearing**: every Prisma query touching user data must scope with `where: { id, userId }`, never `where: { id }` alone. This applies to every read/update/delete/review/quiz/stats query across all API routes.
 
@@ -56,4 +64,4 @@ Keep new features in this shape: pure, testable module in `lib/`, a thin userId-
 - No paid APIs, no AI APIs, anywhere in the app (dictionary/grammar included) unless explicitly requested.
 - SRS interval cap is 7 days (`lib/srs.ts`) — don't change without being asked.
 - Retry-wrong in quizzes is practice-only; it must not overwrite the saved quiz result.
-- UI is dark-only (glassmorphism); keep it mobile-friendly.
+- Preserve both dark and light glassmorphism themes; keep them mobile-friendly.

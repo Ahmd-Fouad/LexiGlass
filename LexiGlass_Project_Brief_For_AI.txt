@@ -28,14 +28,14 @@ The app uses:
 - TypeScript
 - Tailwind CSS v4
 - Prisma
-- SQLite for local development
+- PostgreSQL for local development, testing, and production
 - bcrypt for password hashing
 - jose JWT cookies for authentication
 - Server-side Prisma queries
 - Custom local UI components
 - Dark glassmorphism UI
 
-Local database is SQLite, but deployment should use PostgreSQL such as Supabase, Neon, or Vercel Postgres.
+PostgreSQL is the only supported database. Use an isolated disposable PostgreSQL database for integration and browser tests.
 
 ## 3. Existing core features
 
@@ -60,8 +60,10 @@ Main database models:
 - Flashcard
 - GrammarTopic
 - QuizSession
+- QuizQuestion
 - QuizAnswer
 - ReviewLog
+- RateLimitBucket
 - DictionaryCache
 
 ## 4. Important auth/security behavior
@@ -88,6 +90,10 @@ where: {
 ```
 
 JWT cookies must remain httpOnly. In production, cookies should use secure settings.
+
+JWTs include a database-checked session version so logout-all can revoke old sessions. Unsafe browser API methods must pass centralized same-origin Origin/Referer checks. Auth, provider, dictionary, quiz, review, sync, and writing endpoints use database-backed rate limits.
+
+Every online or offline review action has a durable client action ID. Database uniqueness guarantees one schedule transition. ReviewLog stores authoritative before/after SRS snapshots; undo restores only the latest server snapshot and never trusts client-supplied prior state.
 
 ## 5. Flashcard behavior
 
@@ -175,6 +181,8 @@ Important file:
 ```txt
 lib/quiz.ts
 ```
+
+Quiz questions are server-authoritative. Quiz start persists `QuizQuestion` rows and returns only safe public payloads. The correct answer is not sent before submission. Quiz answer accepts the issued question ID, session ID, stable submission ID, and user answer; it grades and updates QuizAnswer, SRS, ReviewLog, and mistakes atomically. Retry-wrong remains local practice and never changes the stored result.
 
 ## 8. Grammar behavior
 
