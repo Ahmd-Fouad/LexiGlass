@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Sora } from "next/font/google";
 import "./globals.css";
+import ServiceWorkerRegistrar from "@/components/offline/ServiceWorkerRegistrar";
 
 const sora = Sora({ subsets: ["latin"], variable: "--font-sora" });
 const fraunces = Fraunces({
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="aurora" aria-hidden />
         {children}
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   );

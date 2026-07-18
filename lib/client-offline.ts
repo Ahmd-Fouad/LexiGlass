@@ -22,9 +22,10 @@ import {
 import type { Rating } from "./srs";
 
 const DB_NAME = "lexiglass-offline";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const CARDS_STORE = "reviewCards";
 const QUEUE_STORE = "reviewQueue";
+const META_STORE = "metadata";
 const USER_KEY_STORAGE = "lexiglass_offline_user";
 const LAST_SYNC_STORAGE = "lexiglass_offline_last_sync";
 
@@ -43,6 +44,10 @@ function openDb(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains(CARDS_STORE)) db.createObjectStore(CARDS_STORE, { keyPath: "id" });
       if (!db.objectStoreNames.contains(QUEUE_STORE)) db.createObjectStore(QUEUE_STORE, { keyPath: "id" });
+      const metadata = db.objectStoreNames.contains(META_STORE)
+        ? req.transaction!.objectStore(META_STORE)
+        : db.createObjectStore(META_STORE, { keyPath: "key" });
+      metadata.put({ key: "schemaVersion", value: DB_VERSION, migratedAt: new Date().toISOString() });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error("Could not open offline storage."));
@@ -287,15 +292,17 @@ export function getLastSyncAt(): Date | null {
 export async function clearOfflineData(): Promise<void> {
   try {
     window.localStorage.removeItem(LAST_SYNC_STORAGE);
+    window.localStorage.removeItem(USER_KEY_STORAGE);
   } catch {
     /* ignore */
   }
   if (!isOfflineStorageSupported()) return;
   const db = await openDb();
   try {
-    const tx = db.transaction([CARDS_STORE, QUEUE_STORE], "readwrite");
+    const tx = db.transaction([CARDS_STORE, QUEUE_STORE, META_STORE], "readwrite");
     tx.objectStore(CARDS_STORE).clear();
     tx.objectStore(QUEUE_STORE).clear();
+    tx.objectStore(META_STORE).clear();
     await txDone(tx);
   } finally {
     db.close();

@@ -15,7 +15,7 @@
  *
  * Bump VERSION when shipping SW changes so old caches are dropped.
  */
-const VERSION = "v1";
+const VERSION = "v2";
 const STATIC_CACHE = "lexiglass-static-" + VERSION;
 const PRECACHE_URLS = [
   "/manifest.webmanifest",
@@ -52,8 +52,11 @@ self.addEventListener("install", (event) => {
     caches
       .open(STATIC_CACHE)
       .then((cache) => Promise.all([cache.addAll(PRECACHE_URLS), precacheOfflinePage(cache)]))
-      .then(() => self.skipWaiting())
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
