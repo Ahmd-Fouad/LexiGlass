@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, str, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, readJsonBody, str, toErrorResponse } from "@/lib/api-helpers";
 
 /** Marks a quiz session as finished and stores the final score. */
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    const body = await req.json().catch(() => ({}));
+    const parsed = await readJsonBody(req, 2 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
     const sessionId = str(body.sessionId, 100);
     if (!sessionId) return badRequest("sessionId is required.");
 
@@ -19,14 +21,14 @@ export async function POST(req: Request) {
     const correctCount = await db.quizAnswer.count({
       where: { sessionId, isCorrect: true },
     });
-    const answered = await db.quizAnswer.count({ where: { sessionId } });
-
     const updated = await db.quizSession.update({
       where: { id: sessionId },
       data: {
         finishedAt: new Date(),
         correctCount,
-        totalQuestions: Math.max(session.totalQuestions, answered),
+        // Issued-question count was fixed atomically when the session started;
+        // the client cannot inflate it by submitting arbitrary answers.
+        totalQuestions: session.totalQuestions,
       },
     });
     return NextResponse.json({ session: updated });

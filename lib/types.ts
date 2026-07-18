@@ -71,7 +71,18 @@ export interface QuizQuestion {
   explanation?: string;
 }
 
+/** Safe question shape issued to the browser before grading. */
+export type IssuedQuizQuestion = Omit<QuizQuestion, "answer" | "explanation">;
+
 export interface StartQuizResponse {
   sessionId: string;
-  questions: QuizQuestion[];
+  questions: IssuedQuizQuestion[];
+}
+
+export interface QuizAnswerResult {
+  questionId: string;
+  isCorrect: boolean;
+  correctAnswer: string;
+  explanation?: string;
+  duplicate: boolean;
 }

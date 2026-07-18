@@ -22,9 +22,10 @@ import {
 import type { Rating } from "./srs";
 
 const DB_NAME = "lexiglass-offline";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const CARDS_STORE = "reviewCards";
 const QUEUE_STORE = "reviewQueue";
+const META_STORE = "metadata";
 const USER_KEY_STORAGE = "lexiglass_offline_user";
 const LAST_SYNC_STORAGE = "lexiglass_offline_last_sync";
 
@@ -43,6 +44,10 @@ function openDb(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains(CARDS_STORE)) db.createObjectStore(CARDS_STORE, { keyPath: "id" });
       if (!db.objectStoreNames.contains(QUEUE_STORE)) db.createObjectStore(QUEUE_STORE, { keyPath: "id" });
+      const metadata = db.objectStoreNames.contains(META_STORE)
+        ? req.transaction!.objectStore(META_STORE)
+        : db.createObjectStore(META_STORE, { keyPath: "key" });
+      metadata.put({ key: "schemaVersion", value: DB_VERSION, migratedAt: new Date().toISOString() });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error("Could not open offline storage."));
@@ -177,6 +182,7 @@ export interface SyncOutcome {
   applied: number;
   duplicates: number;
   rejected: number;
+  conflicts: number;
   remaining: number;
   error?: string;
 }
@@ -202,9 +208,9 @@ async function doSync(): Promise<SyncOutcome> {
   try {
     actions = await getQueuedReviewActions();
   } catch (e) {
-    return { ok: false, applied: 0, duplicates: 0, rejected: 0, remaining: 0, error: message(e) };
+    return { ok: false, applied: 0, duplicates: 0, rejected: 0, conflicts: 0, remaining: 0, error: message(e) };
   }
-  if (actions.length === 0) return { ok: true, applied: 0, duplicates: 0, rejected: 0, remaining: 0 };
+  if (actions.length === 0) return { ok: true, applied: 0, duplicates: 0, rejected: 0, conflicts: 0, remaining: 0 };
 
   let data: SyncResponse;
   try {
@@ -220,6 +226,7 @@ async function doSync(): Promise<SyncOutcome> {
         applied: 0,
         duplicates: 0,
         rejected: 0,
+        conflicts: 0,
         remaining: actions.length,
         error: body.error ?? `Sync failed (${res.status})`,
       };
@@ -228,6 +235,7 @@ async function doSync(): Promise<SyncOutcome> {
       applied: body.applied ?? 0,
       duplicates: body.duplicates ?? 0,
       rejected: body.rejected ?? 0,
+      conflicts: body.conflicts ?? 0,
       results: Array.isArray(body.results) ? body.results : [],
     };
   } catch {
@@ -236,6 +244,7 @@ async function doSync(): Promise<SyncOutcome> {
       applied: 0,
       duplicates: 0,
       rejected: 0,
+      conflicts: 0,
       remaining: actions.length,
       error: "Could not reach the server. Your queue is kept for the next try.",
     };
@@ -243,7 +252,7 @@ async function doSync(): Promise<SyncOutcome> {
 
   // Every settled action leaves the queue — applied and duplicate succeeded,
   // rejected ones (deleted card, stale timestamp, foreign card) never will.
-  const settled = data.results.map((r) => r.id);
+  const settled = data.results.filter((r) => r.status !== "conflict").map((r) => r.id);
   try {
     await removeQueuedActions(settled);
   } catch {
@@ -255,7 +264,15 @@ async function doSync(): Promise<SyncOutcome> {
   } catch {
     /* ignore */
   }
-  return { ok: true, applied: data.applied, duplicates: data.duplicates, rejected: data.rejected, remaining };
+  return {
+    ok: true,
+    applied: data.applied,
+    duplicates: data.duplicates,
+    rejected: data.rejected,
+    conflicts: data.conflicts,
+    remaining,
+    ...(data.conflicts > 0 ? { error: `${data.conflicts} offline rating conflict requires your attention.` } : {}),
+  };
 }
 
 export function getLastSyncAt(): Date | null {
@@ -275,15 +292,17 @@ export function getLastSyncAt(): Date | null {
 export async function clearOfflineData(): Promise<void> {
   try {
     window.localStorage.removeItem(LAST_SYNC_STORAGE);
+    window.localStorage.removeItem(USER_KEY_STORAGE);
   } catch {
     /* ignore */
   }
   if (!isOfflineStorageSupported()) return;
   const db = await openDb();
   try {
-    const tx = db.transaction([CARDS_STORE, QUEUE_STORE], "readwrite");
+    const tx = db.transaction([CARDS_STORE, QUEUE_STORE, META_STORE], "readwrite");
     tx.objectStore(CARDS_STORE).clear();
     tx.objectStore(QUEUE_STORE).clear();
+    tx.objectStore(META_STORE).clear();
     await txDone(tx);
   } finally {
     db.close();

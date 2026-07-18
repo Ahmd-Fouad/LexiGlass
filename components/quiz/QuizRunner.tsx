@@ -6,7 +6,7 @@ import { answersMatch } from "@/lib/quiz";
 import { checkClozeAnswer } from "@/lib/cloze";
 import { Button, Chip, ErrorBanner, GlassCard, Input, LinkButton, Select, Spinner } from "@/components/ui";
 import SpeakButton from "@/components/pronunciation/SpeakButton";
-import type { QuizQuestion, StartQuizResponse, VocabQuizMode } from "@/lib/types";
+import type { IssuedQuizQuestion, QuizAnswerResult, StartQuizResponse, VocabQuizMode } from "@/lib/types";
 
 /** Pulls the plain sentence out of an "Example: …" explanation, if present. */
 function exampleFromExplanation(explanation?: string): string | null {
@@ -17,9 +17,11 @@ function exampleFromExplanation(explanation?: string): string | null {
 type Phase = "intro" | "loading" | "question" | "feedback" | "results";
 
 interface AnsweredQuestion {
-  question: QuizQuestion;
+  question: IssuedQuizQuestion;
   userAnswer: string;
   isCorrect: boolean;
+  correctAnswer: string;
+  explanation?: string;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -64,13 +66,15 @@ export default function QuizRunner({
   const [mode, setMode] = useState<VocabQuizMode>(initialMode === "tag" ? "standard" : initialMode);
   const [tag, setTag] = useState(initialTag);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [questions, setQuestions] = useState<IssuedQuizQuestion[]>([]);
   const [index, setIndex] = useState(0);
   const [typed, setTyped] = useState("");
   const [answered, setAnswered] = useState<AnsweredQuestion[]>([]);
   const [lastAnswer, setLastAnswer] = useState<AnsweredQuestion | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRetry, setIsRetry] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [practiceKeys, setPracticeKeys] = useState<Record<string, { answer: string; explanation?: string }>>({});
 
   const question = questions[index];
 
@@ -90,6 +94,7 @@ export default function QuizRunner({
       setIndex(0);
       setTyped("");
       setIsRetry(false);
+      setPracticeKeys({});
       setPhase("question");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the quiz");
@@ -97,45 +102,53 @@ export default function QuizRunner({
     }
   }
 
-  function checkTypedAnswer(q: QuizQuestion, userAnswer: string): boolean {
+  function checkPracticeAnswer(q: IssuedQuizQuestion, userAnswer: string, answer: string): boolean {
     // Vocabulary cloze: phrase cards need the full phrase, words tolerate one typo.
     if (q.type === "fill_blank" && q.flashcardId) {
-      return checkClozeAnswer(userAnswer, q.answer, { kind: q.kind ?? "word" });
+      return checkClozeAnswer(userAnswer, answer, { kind: q.kind ?? "word" });
     }
-    return answersMatch(q.answer, userAnswer);
+    return answersMatch(answer, userAnswer);
   }
 
   async function submitAnswer(userAnswer: string) {
-    if (!question) return;
-    const isCorrect =
-      question.options != null
-        ? userAnswer === question.answer
-        : checkTypedAnswer(question, userAnswer);
-
-    const record: AnsweredQuestion = { question, userAnswer, isCorrect };
-    setLastAnswer(record);
-    setAnswered((a) => [...a, record]);
-    setPhase("feedback");
-
-    // Retry passes are practice only — they don't change the saved results or schedule.
-    if (!isRetry && sessionId) {
-      api("/api/quiz/answer", {
-        method: "POST",
-        body: {
-          sessionId,
-          flashcardId: question.flashcardId,
-          grammarTopicId: question.grammarTopicId,
-          generatedQuestionId: question.generatedQuestionId,
-          questionType: question.type,
-          question: question.prompt + (question.context ? ` — ${question.context}` : ""),
-          correctAnswer: question.answer,
-          userAnswer,
-          isCorrect,
-          explanation: question.explanation,
-        },
-      }).catch(() => {
-        // Answer recording failures shouldn't interrupt the quiz.
-      });
+    if (!question || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      let result: QuizAnswerResult;
+      if (isRetry) {
+        const key = practiceKeys[question.id];
+        if (!key) throw new Error("The practice answer is no longer available. Start a new quiz.");
+        result = {
+          questionId: question.id,
+          isCorrect: checkPracticeAnswer(question, userAnswer, key.answer),
+          correctAnswer: key.answer,
+          explanation: key.explanation,
+          duplicate: false,
+        };
+      } else {
+        if (!sessionId) throw new Error("This quiz session is no longer available.");
+        const response = await api<{ result: QuizAnswerResult }>("/api/quiz/answer", {
+          method: "POST",
+          body: { sessionId, questionId: question.id, userAnswer, submissionId: crypto.randomUUID() },
+        });
+        result = response.result;
+        setPracticeKeys((keys) => ({
+          ...keys,
+          [question.id]: { answer: result.correctAnswer, explanation: result.explanation },
+        }));
+      }
+      const record: AnsweredQuestion = {
+        question, userAnswer, isCorrect: result.isCorrect,
+        correctAnswer: result.correctAnswer, explanation: result.explanation,
+      };
+      setLastAnswer(record);
+      setAnswered((a) => [...a, record]);
+      setPhase("feedback");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not grade this answer");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -311,21 +324,21 @@ export default function QuizRunner({
                   <span>
                     Your answer: <span className={a.isCorrect ? "text-teal-200" : "text-rose-200"}>{a.userAnswer}</span>
                     {!a.isCorrect && (
-                      <> · Correct: <span className="text-teal-200">{a.question.answer}</span></>
+                      <> · Correct: <span className="text-teal-200">{a.correctAnswer}</span></>
                     )}
                   </span>
                   <SpeakButton
-                    text={a.question.answer}
-                    label={`Listen to the correct answer: ${a.question.answer}`}
+                    text={a.correctAnswer}
+                    label={`Listen to the correct answer: ${a.correctAnswer}`}
                     className="!size-6 shrink-0 !text-xs"
                   />
                 </p>
-                {!a.isCorrect && a.question.explanation && (
+                {!a.isCorrect && a.explanation && (
                   <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted/80">
-                    <span>{a.question.explanation}</span>
-                    {exampleFromExplanation(a.question.explanation) && (
+                    <span>{a.explanation}</span>
+                    {exampleFromExplanation(a.explanation) && (
                       <SpeakButton
-                        text={exampleFromExplanation(a.question.explanation)!}
+                        text={exampleFromExplanation(a.explanation)!}
                         label="Listen to the example sentence"
                         className="!size-5 shrink-0 !text-[10px]"
                       />
@@ -371,6 +384,7 @@ export default function QuizRunner({
           style={{ width: `${(index / questions.length) * 100}%` }}
         />
       </div>
+      {error && <ErrorBanner message={error} />}
 
       <GlassCard className="p-6 sm:p-8">
         <p className="text-lg font-medium sm:text-xl">{question.prompt}</p>
@@ -396,7 +410,9 @@ export default function QuizRunner({
                   placeholder="Type your answer…"
                   aria-label="Your answer"
                 />
-                <Button type="submit" disabled={!typed.trim()} className="shrink-0 !px-8">Check</Button>
+                <Button type="submit" disabled={!typed.trim() || submitting} className="shrink-0 !px-8">
+                  {submitting ? "Checking…" : "Check"}
+                </Button>
               </form>
             ) : (
               <div className={`grid gap-3 ${question.options!.length === 2 ? "grid-cols-2" : "sm:grid-cols-2"}`}>
@@ -404,6 +420,7 @@ export default function QuizRunner({
                   <button
                     key={opt}
                     onClick={() => submitAnswer(opt)}
+                    disabled={submitting}
                     className="btn-ghost rounded-xl px-4 py-3.5 text-left text-sm font-medium transition-transform hover:scale-[1.01]"
                   >
                     {opt}
@@ -428,11 +445,11 @@ export default function QuizRunner({
               <p className="font-semibold">{lastAnswer.isCorrect ? "Correct!" : "Not quite."}</p>
               {!lastAnswer.isCorrect && (
                 <p className="mt-1 text-sm">
-                  You answered “{lastAnswer.userAnswer}”. Correct answer: <strong>{lastAnswer.question.answer}</strong>
+                  You answered “{lastAnswer.userAnswer}”. Correct answer: <strong>{lastAnswer.correctAnswer}</strong>
                 </p>
               )}
-              {lastAnswer.question.explanation && (
-                <p className="mt-1 text-sm opacity-90">{lastAnswer.question.explanation}</p>
+              {lastAnswer.explanation && (
+                <p className="mt-1 text-sm opacity-90">{lastAnswer.explanation}</p>
               )}
             </div>
             <Button onClick={next} className="w-full !py-3">

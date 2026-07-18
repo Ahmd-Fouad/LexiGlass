@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, oneOf, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, oneOf, readJsonBody, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import {
   analyzeWritingAttempt,
   cardToWritingTarget,
@@ -36,7 +37,11 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    const body = await req.json().catch(() => ({}));
+    const limited = await enforceRateLimit({ req, action: "writingAttempt", userId });
+    if (limited) return limited;
+    const parsed = await readJsonBody(req, 12 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
 
     const mode = oneOf<WritingMode>(body.mode, WRITING_MODES, "random");
     const text = strOrEmpty(body.text, 5000);

@@ -1,7 +1,6 @@
 // LexiGlass database schema.
-// Provider is PostgreSQL (Supabase/Neon/Vercel Postgres) — set DATABASE_URL.
-// For zero-setup local SQLite instead: change provider to "sqlite", set
-// DATABASE_URL="file:./dev.db" and re-run migrate dev (fresh migrations).
+// PostgreSQL is the only supported provider. Set DATABASE_URL before running
+// migrations or starting the application.
 
 generator client {
   provider = "prisma-client-js"
@@ -18,6 +17,7 @@ model User {
   name               String
   passwordHash       String
   createdAt          DateTime                   @default(now())
+  sessionVersion     Int                        @default(1)
   flashcards         Flashcard[]
   grammarTopics      GrammarTopic[]
   quizSessions       QuizSession[]
@@ -60,8 +60,10 @@ model Flashcard {
   updatedAt   DateTime     @updatedAt
   reviewLogs  ReviewLog[]
   quizAnswers QuizAnswer[]
+  quizQuestions QuizQuestion[]
 
   @@index([userId, dueDate])
+  @@index([userId, createdAt, id])
 }
 
 model GrammarTopic {
@@ -78,10 +80,11 @@ model GrammarTopic {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   quizAnswers    QuizAnswer[]
+  quizQuestions  QuizQuestion[]
   generatedQuestions GeneratedGrammarQuestion[]
   grammarMistakes    GrammarMistake[]
 
-  @@index([userId])
+  @@index([userId, createdAt, id])
 }
 
 // A grammar quiz question generated for one topic — either by an external
@@ -120,6 +123,7 @@ model GeneratedGrammarQuestion {
   updatedAt      DateTime  @updatedAt
 
   grammarMistakes GrammarMistake[]
+  quizQuestions   QuizQuestion[]
 
   @@index([grammarTopicId, status])
   @@index([userId, grammarTopicId, status])
@@ -185,6 +189,7 @@ model QuizSession {
   startedAt      DateTime     @default(now())
   finishedAt     DateTime?
   answers        QuizAnswer[]
+  questions      QuizQuestion[]
 
   @@index([userId, startedAt])
 }
@@ -193,6 +198,9 @@ model QuizAnswer {
   id             String        @id @default(cuid())
   sessionId      String
   session        QuizSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  quizQuestionId String        @unique
+  quizQuestion   QuizQuestion  @relation(fields: [quizQuestionId], references: [id], onDelete: Cascade)
+  submissionId  String
   flashcardId    String?
   flashcard      Flashcard?    @relation(fields: [flashcardId], references: [id], onDelete: SetNull)
   grammarTopicId String?
@@ -203,6 +211,59 @@ model QuizAnswer {
   userAnswer     String
   isCorrect      Boolean
   createdAt      DateTime      @default(now())
+
+  @@unique([sessionId, submissionId])
+  @@index([sessionId])
+  @@index([flashcardId, createdAt])
+  @@index([grammarTopicId, createdAt])
+}
+
+// Fixed-window abuse-control bucket. Keys are one-way hashes of endpoint and
+// privacy-safe identity inputs; raw IP/email values are never stored.
+model RateLimitBucket {
+  key          String   @id
+  action       String
+  count        Int      @default(0)
+  windowStart  DateTime
+  blockedUntil DateTime?
+  expiresAt    DateTime
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@index([action, windowStart])
+}
+
+// One server-authoritative question issued as part of a quiz session. The
+// answer and explanation never leave the server until this item is graded.
+model QuizQuestion {
+  id                      String                    @id @default(cuid())
+  sessionId               String
+  session                 QuizSession               @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  orderIndex              Int
+  questionType            String
+  prompt                  String
+  context                 String?
+  options                 Json?
+  correctAnswer           String
+  explanation             String?
+  cardKind                String?
+  tags                    Json?
+  flashcardId             String?
+  flashcard               Flashcard?                @relation(fields: [flashcardId], references: [id], onDelete: SetNull)
+  grammarTopicId          String?
+  grammarTopic            GrammarTopic?             @relation(fields: [grammarTopicId], references: [id], onDelete: SetNull)
+  generatedQuestionId     String?
+  generatedQuestion       GeneratedGrammarQuestion? @relation(fields: [generatedQuestionId], references: [id], onDelete: SetNull)
+  schemaVersion           Int                       @default(1)
+  answeredAt              DateTime?
+  createdAt               DateTime                  @default(now())
+  answer                  QuizAnswer?
+
+  @@unique([sessionId, orderIndex])
+  @@index([sessionId, answeredAt])
+  @@index([flashcardId])
+  @@index([grammarTopicId])
+  @@index([generatedQuestionId])
 }
 
 // Cached external dictionary lookups (dictionaryapi.dev, FreeDictionaryAPI,
@@ -235,6 +296,7 @@ model WritingAttempt {
   promptWords Json // WritingTarget[] the attempt was written against
   text        String // the user's writing
   feedback    Json // WritingFeedback (used/missing words, warnings, etc.)
+  schemaVersion Int    @default(1)
   score       Int      @default(0) // 0-100 overall score
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -250,10 +312,29 @@ model ReviewLog {
   flashcardId    String
   flashcard      Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
   rating         String // again | hard | good | easy
+  clientActionId String?
+  source         String    @default("online") // online | offline | quiz
   wasCorrect     Boolean
   intervalBefore Float
   intervalAfter  Float
+  easeFactorBefore Float?
+  easeFactorAfter  Float?
+  dueDateBefore    DateTime?
+  dueDateAfter     DateTime?
+  reviewCountBefore Int?
+  reviewCountAfter  Int?
+  correctCountBefore Int?
+  correctCountAfter  Int?
+  incorrectCountBefore Int?
+  incorrectCountAfter  Int?
+  lapsesBefore     Int?
+  lapsesAfter      Int?
+  lastReviewedAtBefore DateTime?
+  lastReviewedAtAfter  DateTime?
+  revertedAt       DateTime?
   reviewedAt     DateTime  @default(now())
 
   @@index([userId, reviewedAt])
+  @@index([userId, flashcardId, reviewedAt])
+  @@unique([userId, clientActionId])
 }

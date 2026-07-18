@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
-import { badRequest, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
+import { badRequest, readJsonBody, strOrEmpty, toErrorResponse } from "@/lib/api-helpers";
 import { practiceGrammarMistake } from "@/lib/grammar-mistakes";
 
 type Params = { params: Promise<{ id: string }> };
@@ -13,7 +13,9 @@ export async function POST(req: Request, { params }: Params) {
   try {
     const userId = await requireUserId();
     const { id } = await params;
-    const body = await req.json().catch(() => ({}));
+    const parsed = await readJsonBody(req, 4 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.value;
     const answer = strOrEmpty(body.answer, 1000);
     if (!answer) return badRequest("An answer is required.");
 

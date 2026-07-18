@@ -127,6 +127,13 @@ export default async function DashboardPage() {
     { label: "Accuracy", value: `${stats.accuracy}%`, href: "/stats" },
     { label: "Mastered", value: stats.masteredCount, href: "/stats" },
   ];
+  const starterSteps = [
+    { label: "Add your first card", href: "/cards/new", done: stats.totalWords + stats.totalPhrases > 0 },
+    { label: "Complete your first review", href: "/review", done: stats.totalReviews > 0 },
+    { label: "Try your first quiz", href: "/quiz/vocab", done: stats.totalQuizzes > 0 },
+    { label: "View your progress", href: "/stats", done: false },
+  ];
+  const showStarterChecklist = starterSteps.slice(0, 3).some((step) => !step.done);
 
   // Active-practice cards, enriched from today's plan when possible.
   const writingItem = plan.find((i) => i.id === "writing");
@@ -202,6 +209,28 @@ export default async function DashboardPage() {
           </div>
         </div>
       </GlassCard>
+
+      {showStarterChecklist && (
+        <GlassCard className="p-6">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-muted">Getting started</h2>
+          <p className="mt-1 text-sm text-ink-muted">A short path through the core study loop.</p>
+          <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+            {starterSteps.map((step) => (
+              <li key={step.label}>
+                <Link
+                  href={step.href}
+                  className="flex min-h-12 items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 hover:bg-white/[0.06]"
+                >
+                  <span aria-hidden className={step.done ? "text-teal-glow" : "text-ink-muted"}>
+                    {step.done ? "✓" : "○"}
+                  </span>
+                  <span className={step.done ? "text-ink-muted line-through" : "text-ink"}>{step.label}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </GlassCard>
+      )}
 
       {/* Smart daily study plan */}
       <section aria-label="Today's study plan">

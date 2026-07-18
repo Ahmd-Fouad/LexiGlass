@@ -9,7 +9,7 @@ A full-stack flashcard and grammar study app with a spaced-repetition system, bu
 - **Smart Definition & Example Assistant** — in the Add/Edit Word form, one click (or focusing an empty field) suggests real dictionary definitions and example sentences for the word or phrase you typed, powered entirely by **free, keyless APIs** — no paid AI or dictionary services. Suggestions are never applied automatically; you click "Use this definition" / "Use this example" to fill a field. Lookups are cached in the database so the same term never hits the external APIs twice.
 - **Spaced repetition** — a simplified SM-2. Ratings **Again / Hard / Good / Easy** update each card's ease factor, interval, and next due date. Intervals are **capped at 7 days**, so every card comes back at least once or twice a week. Wrong answers reset a card to due-now.
 - **Review mode** — flip-card review of due cards with the four rating buttons.
-- **Vocabulary quiz** — ~20 questions per quiz, chosen by priority: due today → previously-wrong → difficult → longest-unreviewed (older cards fill the rest). Mixed question types: meaning MCQ, reverse MCQ, fill-in-the-blank from the example sentence, true/false. Scores and every answer are saved; wrong answers can be retried as practice.
+- **Vocabulary quiz** — ~20 server-issued questions per quiz, chosen by priority: due today → previously-wrong → difficult → longest-unreviewed. Correct answers remain server-side until submission; grading and SRS writes are atomic and idempotent. Wrong answers can be retried as practice without rewriting the saved result.
 - **Grammar topics** — title, explanation, examples, common mistakes (`wrong => right` format), notes, tags, difficulty. Add / edit / delete / search.
 - **Grammar quiz** — questions generated **from your own topics** (examples become "choose the correct sentence", mistakes become "correct the sentence" / "find the mistake") plus a built-in local bank of ~40 questions that leans toward topics you've studied. Works fully offline-from-keys; see [Adaptive grammar question pool](#adaptive-grammar-question-pool) for the optional AI-provider top-up.
 - **Adaptive grammar question pool** — each topic keeps a pool of generated questions in the database. Correct answers retire a question as "mastered" (never deleted); wrong answers send it to the Mistake Bank and the pool tops itself up in the background. Generation runs through free-tier AI providers (Gemini, Groq, OpenRouter, Cloudflare, Hugging Face) **only if you add a key** — with zero keys, a built-in local generator keeps the pool filled. Keys stay server-side, never in the client or the database.
@@ -20,7 +20,8 @@ A full-stack flashcard and grammar study app with a spaced-repetition system, bu
 - **Study collections** (`/collections`) — ready-made study sets built from your cards: Due today, Weak words, Recent mistakes, Difficult phrases, Mastered, plus auto-generated sets by tag, category and difficulty. Each collection links straight to review, quiz, writing practice, or the filtered card list.
 - **Pronunciation practice** (`/pronunciation`) — listen to a word/phrase/sentence (browser text-to-speech), say it out loud, and get a local similarity score with matched / missed / extra words. Uses browser speech APIs only; gracefully falls back to listen-only when speech recognition isn't available.
 - **Progress page** — daily reviews (14-day chart), accuracy over 6 weeks, most difficult words, mastered count, quiz history, streak.
-- **Auth** — email/password accounts (bcrypt-hashed) with signed httpOnly JWT session cookies; every user's data is isolated.
+- **Offline/PWA** — cached review cards and an idempotent review queue survive connectivity changes. Logout warns about unsynced work, then removes that account's private IndexedDB data. API/authenticated HTML is never service-worker cached.
+- **Auth** — email/password accounts (bcrypt-hashed) with signed httpOnly JWT session cookies, session revocation, same-origin mutation checks, and database-backed abuse controls; every user's data is isolated.
 
 ## Getting started
 
@@ -30,6 +31,9 @@ cp .env.example .env        # then fill in DATABASE_URL + AUTH_SECRET (see below
 npx prisma migrate dev      # applies migrations to your database
 npm run db:seed             # optional: demo account with sample data
 npm run dev                 # http://localhost:3000
+npm test                    # unit and contract tests
+npm run lint                # TypeScript + zero-warning policy checks
+npm run build               # offline-capable production build
 ```
 
 Demo account (after seeding): **demo@lexiglass.app / demo1234**
@@ -38,8 +42,9 @@ Demo account (after seeding): **demo@lexiglass.app / demo1234**
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | A `postgresql://…` connection string (the schema's provider is PostgreSQL — Supabase, Neon and Vercel Postgres all work). For zero-setup local SQLite instead, see [Using SQLite locally](#using-sqlite-locally). |
+| `DATABASE_URL` | A `postgresql://…` connection string. PostgreSQL is the only supported provider. |
 | `AUTH_SECRET` | Long random string that signs session cookies. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `APP_ORIGIN` | Canonical public browser origin used for mutation Origin/Referer validation. |
 
 Copy `.env.example` to `.env` and fill in both values — **use a fresh `AUTH_SECRET` for every deployment** and never commit real secrets.
 
@@ -49,36 +54,21 @@ Copy `.env.example` to `.env` and fill in both values — **use a fresh `AUTH_SE
 
 Schema lives in [prisma/schema.prisma](prisma/schema.prisma) with migrations under `prisma/migrations/`:
 
-- **User** — account + password hash
+- **User** — account + password hash + session-revocation version
 - **Flashcard** — content fields + SRS state (easeFactor, intervalDays, dueDate, counts, lapses)
 - **GrammarTopic** — explanation, examples, common mistakes, tags
 - **GeneratedGrammarQuestion** — the per-topic adaptive question pool (provider, status active/mastered/…, quality score, show/answer counters)
 - **GrammarMistake** — one wrongly-answered grammar question for the Mistake Bank (active → practiced → resolved, never hard-deleted)
 - **AIGenerationLog** — one row per generation attempt (provider, counts, no secrets)
-- **QuizSession** / **QuizAnswer** — every quiz and every answered question
-- **ReviewLog** — one row per SRS review (feeds charts, accuracy, and streak)
+- **QuizSession** / **QuizQuestion** / **QuizAnswer** — server-issued question authority and exactly one durable answer per question
+- **ReviewLog** — idempotent review event with full before/after schedule snapshots and undo state
+- **RateLimitBucket** — expiring database-backed abuse-control windows with hashed identities
 - **DictionaryCache** — cached external dictionary lookups (definitions and examples separately, versioned)
 - **WritingAttempt** — one saved Writing Practice attempt (mode, target words, text, rule-based feedback JSON, 0–100 score)
 
-### Using SQLite locally
-
-The schema ships with `provider = "postgresql"` (what the deployed app uses). For a zero-setup local database:
-
-1. In `prisma/schema.prisma` change `provider = "postgresql"` → `provider = "sqlite"`.
-2. Set `DATABASE_URL="file:./dev.db"` in `.env`.
-3. Delete `prisma/migrations/` (they were generated for Postgres) and run `npx prisma migrate dev --name init-sqlite`, then `npm run db:seed`.
-
-No application code changes are needed — everything goes through Prisma. Just don't commit the provider switch or the regenerated migrations if the deployment still targets Postgres.
-
 ## Deploying
 
-**Vercel** (recommended):
-1. Push the repo to GitHub and import it in Vercel.
-2. Use a hosted Postgres database (Supabase, Neon, or Vercel Postgres) — SQLite files don't persist on serverless hosts. The schema already targets Postgres.
-3. Set `DATABASE_URL` and `AUTH_SECRET` in Vercel's environment variables.
-4. Run migrations against the production DB: `npx prisma migrate deploy`.
-
-Any Node host (Railway, Render, a VPS) also works: `npm run build && npm start`. On a VPS with a persistent disk, SQLite works too (see [Using SQLite locally](#using-sqlite-locally)).
+LexiGlass targets Node 22 and PostgreSQL without requiring a particular host. A release runs `npm ci`, `npx prisma generate`, `npm run db:deploy`, `npm run build`, then `npm start`. Never seed production automatically. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the complete release, backup, rollback, readiness, privacy, and security checklist.
 
 ## How the spaced repetition works
 
@@ -148,23 +138,15 @@ app/
   (app)/mistakes             Mistake Bank
   (app)/stats                progress charts + history
   api/...                    REST endpoints (auth, cards, grammar, review, quiz,
-<<<<<<< HEAD
-                             writing, pronunciation)
-components/                  UI kit, shell, feature components
-lib/                         db, auth, srs, quiz/cloze/writing/collections/
-                             pronunciation logic, analytics, stats
-=======
                              dictionary, writing, pronunciation, review/sync,
                              grammar-mistakes, ai/test-provider)
 components/                  UI kit, shell, feature components
 lib/                         db, auth, srs, quiz/cloze/writing/collections/
-                             pronunciation/offline/gamification/reminders/theme
-                             logic, analytics, stats
+                             pronunciation/offline/theme logic, analytics, stats
 lib/ai/                      grammar-question generation: provider clients +
                              orchestrator (fallback, validate, dedupe, score)
->>>>>>> d2ea08d (Fix quiz answer ownership and provider hardening)
 prisma/                      schema, migrations, seed
-middleware.ts                session check + redirects
+middleware.ts                session, origin, no-store and request-ID gate
 ```
 
 ## Active practice modes (browser APIs, no paid services)
@@ -184,6 +166,7 @@ All comparison and scoring (pronunciation similarity, writing feedback, cloze ch
 - **Speech recognition** isn't available in every browser (notably Firefox and iOS Safari at time of writing) — those users get text-to-speech and the listen-only fallback.
 - **Cloze suggested ratings** in review are suggestions only — you still choose the SRS rating, so the 7-day interval logic is never overridden automatically.
 - **Writing feedback is rule-based**, not grammar-perfect — it catches usage, structure and mechanics issues, not every subtle error (by design: no AI).
-- **Light mode** — the UI is dark-only; the token system in `globals.css` makes a light theme straightforward to add.
-- **CSV/Anki import-export**, **PWA/offline**, and **study reminders** would all be natural next steps.
-- Sessions last 30 days; there's no password-reset flow yet.
+- **CSV/Anki import-export** and **study reminders** remain possible future work.
+- Sessions last 30 days and can be revoked with logout-all; password reset and email verification need a future email-delivery design.
+- The production CSP temporarily permits inline scripts/styles required by the current Next.js runtime and generated styling. It does not permit `unsafe-eval` in production.
+- `npm audit` reports two moderate findings in Next's nested PostCSS; its offered forced fix is a breaking downgrade and was not applied.

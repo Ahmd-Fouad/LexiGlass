@@ -38,13 +38,15 @@ export interface DashboardStats {
   accuracy: number; // 0-100, all-time
   streak: number;
   masteredCount: number;
+  totalReviews: number;
+  totalQuizzes: number;
 }
 
 export async function getDashboardStats(userId: string): Promise<DashboardStats> {
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
 
-  const [totalWords, totalPhrases, totalGrammar, dueToday, weeklyReviews, reviewLogs, cards] =
+  const [totalWords, totalPhrases, totalGrammar, dueToday, weeklyReviews, reviewLogs, cards, totalQuizzes] =
     await Promise.all([
       db.flashcard.count({ where: { userId, kind: "word" } }),
       db.flashcard.count({ where: { userId, kind: "phrase" } }),
@@ -59,6 +61,7 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
         where: { userId },
         select: { reviewCount: true, correctCount: true, intervalDays: true },
       }),
+      db.quizSession.count({ where: { userId, finishedAt: { not: null } } }),
     ]);
 
   const totalReviews = reviewLogs.length;
@@ -76,6 +79,8 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
     accuracy: totalReviews === 0 ? 0 : Math.round((correctReviews / totalReviews) * 100),
     streak: computeStreak(reviewLogs.map((r) => r.reviewedAt)),
     masteredCount,
+    totalReviews,
+    totalQuizzes,
   };
 }
 

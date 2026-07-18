@@ -125,7 +125,7 @@ export function Spinner({ label = "Loading…" }: { label?: string }) {
 
 export function ErrorBanner({ message }: { message: string }) {
   return (
-    <div className="rounded-xl border border-rose-glow/40 bg-rose-glow/10 px-4 py-3 text-sm text-rose-200">
+    <div role="alert" className="rounded-xl border border-rose-glow/40 bg-rose-glow/10 px-4 py-3 text-sm text-rose-200">
       {message}
     </div>
   );
